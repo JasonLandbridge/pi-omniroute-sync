@@ -39,7 +39,7 @@
     "type": "git",
     "url": "git+https://github.com/JasonLandbridge/pi-omniroute-sync.git"
   },
-  "homepage": "https://github.com/JasonLandbridge/pi-omniroute-sync#readme",
+  "homepage": "https://pi.dev/packages/pi-omniroute-sync",
   "bugs": {
     "url": "https://github.com/JasonLandbridge/pi-omniroute-sync/issues"
   },
