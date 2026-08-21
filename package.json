@@ -1,7 +1,7 @@
 {
   "name": "pi-omniroute-sync",
   "version": "1.0.0",
-  "description": "OmniRoute extension for Pi Coding Agent (pi) and Oh My Pi (omp) — model sync and prompt-tool fallback for chat-only models",
+  "description": "OmniRoute models sync extension for Pi Coding Agent (pi) and Oh My Pi (omp)!",
   "keywords": [
     "omp-plugin",
     "oh-my-pi",

@@ -3,29 +3,19 @@
 [![npm version](https://img.shields.io/npm/v/pi-omniroute-sync.svg?style=flat-square)](https://www.npmjs.com/package/pi-omniroute-sync)
 [![npm downloads](https://img.shields.io/npm/dm/pi-omniroute-sync.svg?style=flat-square)](https://www.npmjs.com/package/pi-omniroute-sync)
 
-Use an [OmniRoute](https://github.com/diegosouzapw/OmniRoute) server as a native model provider in [Pi Coding Agent](https://pi.dev) or [Oh My Pi](https://omp.sh).
-
-The extension discovers the models your OmniRoute instance can actually use, adds them to the normal `/model` picker under the `omni` provider, attaches OmniRoute pricing and capability metadata, and sends conversations through the host's native OpenAI Responses implementation.
-
-```text
-/model openai/gpt-5
-```
-
-No second model picker or duplicate provider is introduced.
+[OmniRoute]([OmniRoute](https://github.com/diegosouzapw/OmniRoute)) models sync extension for [Pi Coding Agent](https://pi.dev) (pi) and [Oh My Pi](https://omp.sh) (omp)!
 
 ## What You Get
 
 - One package for both `pi` and `omp`.
 - Interactive setup with `/omni setup`.
 - A polished, tabbed `/omni config` overlay.
+- Stable session affinity and prompt-cache reuse through the host.
 - Models in the standard `/model` picker.
 - Strict filtering based on active OmniRoute provider connections.
 - Optional include and exclude model globs.
 - Optional global `auto` and `auto/*` routing models.
 - Real cost metadata from OmniRoute's pricing API.
-- Native `/v1/responses` streaming and tool calls.
-- Stable session affinity and prompt-cache reuse through the host.
-- Safe startup refresh based on the age of the last successful sync.
 - Secure extension-owned settings; API keys are never copied to `models.json`.
 - Health status, model browsing, and direct model testing commands.
 
