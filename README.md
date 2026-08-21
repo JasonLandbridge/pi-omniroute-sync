@@ -433,18 +433,6 @@ Core implementation:
 | `src/pi.ts` | Pi adapter and native Pi TUI injection. |
 | `src/omp.ts` | OMP adapter and native OMP TUI injection. |
 
-## Releases
-
-Releases are automated from the `master` branch with semantic-release using the release configuration embedded in `package.json`. The commit analyzer and release-notes generator determine the next version from Conventional Commits:
-
-```text
-fix: correct provider filtering
-feat: add model include globs
-feat!: change the settings schema
-```
-
-The release workflow creates the npm release, Git tag, GitHub release, and generated release notes. npm publishing uses trusted publishing through GitHub Actions OIDC; no long-lived `NPM_TOKEN` is required after the package's trusted publisher is configured.
-
 ## License
 
 [MIT](LICENSE)
