@@ -1,0 +1,81 @@
+{
+  "name": "pi-omniroute-sync",
+  "version": "1.0.0",
+  "description": "OmniRoute extension for Pi Coding Agent (pi) and Oh My Pi (omp) — model sync and prompt-tool fallback for chat-only models",
+  "keywords": [
+    "omp-plugin",
+    "oh-my-pi",
+    "pi-package",
+    "pi-coding-agent",
+    "omniroute",
+    "llm",
+    "ai-gateway",
+    "extension"
+  ],
+  "type": "module",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "omp": {
+    "extensions": [
+      "./src/omp.ts"
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./src/pi.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "release": "bun ./node_modules/semantic-release/bin/semantic-release.js"
+  },
+  "author": "JasonLandbridge",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JasonLandbridge/pi-omniroute-sync.git"
+  },
+  "homepage": "https://github.com/JasonLandbridge/pi-omniroute-sync#readme",
+  "bugs": {
+    "url": "https://github.com/JasonLandbridge/pi-omniroute-sync/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@oh-my-pi/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "@oh-my-pi/pi-tui": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@earendil-works/pi-tui": "^0.84.2",
+    "@oh-my-pi/pi-coding-agent": "^15.9.0",
+    "@oh-my-pi/pi-tui": "^15.9.0",
+    "@semantic-release/npm": "^13.1.5",
+    "@types/node": "^25.9.1",
+    "semantic-release": "^24.2.8",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}
