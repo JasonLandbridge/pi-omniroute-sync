@@ -70,11 +70,11 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.2",
     "@earendil-works/pi-tui": "^0.84.2",
-    "@oh-my-pi/pi-coding-agent": "^15.13.3",
-    "@oh-my-pi/pi-tui": "^15.13.3",
+    "@oh-my-pi/pi-coding-agent": "^17.4.1",
+    "@oh-my-pi/pi-tui": "^17.4.1",
     "@semantic-release/npm": "^13.1.5",
-    "@types/node": "^25.9.3",
-    "semantic-release": "^24.2.9",
+    "@types/node": "^25.9.5",
+    "semantic-release": "^25.0.9",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   }
