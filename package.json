@@ -31,7 +31,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "release": "bun ./node_modules/semantic-release/bin/semantic-release.js"
+    "release": "node ./node_modules/semantic-release/bin/semantic-release.js"
   },
   "author": "JasonLandbridge",
   "license": "MIT",

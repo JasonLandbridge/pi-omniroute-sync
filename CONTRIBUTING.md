@@ -12,7 +12,7 @@ bun install
 |---|---|
 | `bun run typecheck` | Type-check the TypeScript source and tests. |
 | `bun run test` | Run the complete Vitest unit suite. |
-| `bun run release` | Run semantic-release; intended for the release workflow, not routine local development. |
+| `bun run release` | Run semantic-release with Node; intended for the release workflow, not routine local development. Requires Node 24.10.0 or newer. |
 
 The unit suite imports both package entry points and verifies their host-specific options and native input construction. A separate import-only smoke script is intentionally unnecessary.
 

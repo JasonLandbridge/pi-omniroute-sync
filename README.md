@@ -402,6 +402,8 @@ bun run typecheck
 bun run test
 ```
 
+The release workflow runs semantic-release with Node.js 24.10.0 or newer because current semantic-release versions do not support Bun's Node compatibility runtime.
+
 The test suite imports both Pi and OMP package entry points and covers their host-specific adapters, secure configuration, model normalization, strict provider filtering, provider aliases, global route filtering, glob matching, pricing mapping, startup staleness, staged dialog behavior, native input handling, and save/discard semantics. This unit coverage replaces a separate import-only smoke script.
 
 Package entry points:
