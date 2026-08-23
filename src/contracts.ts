@@ -72,7 +72,7 @@ export interface ProviderEntry {
 	api: "openai-responses";
 	authHeader: boolean;
 	compat: {
-		sessionAffinityFormat: "openai";
+		sessionAffinityFormat: "openrouter";
 		supportsLongCacheRetention: true;
 	};
 	models: ProviderModelConfig[];

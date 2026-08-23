@@ -10,7 +10,7 @@
 - One package for both `pi` and `omp`.
 - Interactive setup with `/omni setup`.
 - A polished, tabbed `/omni config` overlay.
-- Stable session affinity and prompt-cache reuse through the host.
+- Stable session affinity and prompt-cache reuse through OmniRoute's `x-session-id` header.
 - Models in the standard `/model` picker.
 - Strict filtering based on active OmniRoute provider connections.
 - Optional include and exclude model globs.

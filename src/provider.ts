@@ -4,8 +4,8 @@ import { modelsJsonPath, saveSettings, type OmniConfig, type OmniSettings } from
 import type { OmniPI, ProviderEntry, ProviderModelConfig } from "./contracts.ts";
 
 const PROVIDER_API = "openai-responses";
-const PROVIDER_COMPAT = {
-	sessionAffinityFormat: "openai",
+export const PROVIDER_COMPAT = {
+	sessionAffinityFormat: "openrouter",
 	supportsLongCacheRetention: true,
 } as const;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tiers: [] } as const;

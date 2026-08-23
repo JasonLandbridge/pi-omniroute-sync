@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, shouldIncludeModel, usableProviderAliases } from "../src/provider.ts";
+import { globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, PROVIDER_COMPAT, shouldIncludeModel, usableProviderAliases } from "../src/provider.ts";
+
+it("uses OmniRoute's supported session-affinity header", () => {
+	expect(PROVIDER_COMPAT.sessionAffinityFormat).toBe("openrouter");
+});
 
 it("normalizes legacy persisted models for Responses and cost tiers", () => {
 	const [model] = normalizePersistedModels([{ id: "codex/gpt-5", name: "GPT-5" }, {}, { id: "" }]);
