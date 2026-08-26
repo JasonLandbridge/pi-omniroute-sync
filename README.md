@@ -24,6 +24,7 @@
 You need:
 
 - A running OmniRoute server.
+- If OmniRoute authentication is enabled, an inference API key with `manage` or `admin` scope. The extension uses the same key for `/v1` inference and the management-protected `/api/providers` and `/api/pricing` endpoints during model synchronization.
 - Either:
   - Pi Coding Agent (`@earendil-works/pi-coding-agent`), or
   - Oh My Pi (`@oh-my-pi/pi-coding-agent`).
@@ -75,7 +76,7 @@ omp install git:github.com/JasonLandbridge/pi-omniroute-sync
 
    You may enter a URL ending in `/v1`; the extension normalizes it to the server base URL.
 
-4. Enter the OmniRoute API key, or leave it empty if your server does not require authentication.
+4. Enter an OmniRoute inference API key with `manage` or `admin` scope, or leave it empty if your server does not require authentication.
 5. Open the normal model picker:
 
    ```text
