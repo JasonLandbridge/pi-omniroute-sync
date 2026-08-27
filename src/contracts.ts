@@ -70,6 +70,7 @@ export interface ProviderEntry {
 	baseUrl: string;
 	apiKey: string;
 	api: "openai-responses";
+	auth?: "apiKey" | "none" | "oauth";
 	authHeader: boolean;
 	compat: {
 		sessionAffinityFormat: "openrouter";

@@ -290,7 +290,7 @@ For normal startup synchronization and complete configuration management, run `/
 | `~/.omp/agent/extensions/pi-omniroute-sync/settings.json` | All extension configuration, the API key, and the last successful sync timestamp. |
 | `~/.omp/agent/models.json` | Persisted provider metadata and synchronized models. |
 
-`settings.json` is the extension's only state/configuration file. The API key is used at runtime when registering the provider but is deliberately omitted from `models.json`. Other providers already present in `models.json` are preserved when OmniRoute synchronizes.
+`settings.json` is the extension's only state/configuration file. The API key is used at runtime when registering the provider but is deliberately omitted from `models.json`. The persisted OmniRoute provider is marked `auth: "none"` so OMP can validate its custom model catalog before the extension restores the protected key at runtime. Other providers already present in `models.json` are preserved when OmniRoute synchronizes.
 
 Treat `settings.json` as a secret. Do not commit it or copy it into a repository.
 
@@ -314,6 +314,14 @@ Performs the same strict discovery and provider update as `/omni sync`, then rep
 Both tools honor cancellation from the host. Network requests combine host cancellation with bounded request timeouts.
 
 ## Troubleshooting
+
+### OMP reports `Provider omni` during startup
+
+Only enable one OmniRoute extension at a time. `pi-omniroute-sync` and `omniroute-agent-extension` both register the provider name `omni`; enabling both can cause startup validation errors. Disable or uninstall the older extension:
+
+```bash
+omp plugin disable omniroute-agent-extension
+```
 
 ### The extension says OmniRoute is unconfigured
 

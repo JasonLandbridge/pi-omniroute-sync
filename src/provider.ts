@@ -309,6 +309,7 @@ function persistModels(agentHome: string, config: OmniConfig, models: ProviderMo
 	file.providers[config.providerName] = {
 		baseUrl: `${config.serverUrl}/v1`,
 		api: PROVIDER_API,
+		auth: "none",
 		authHeader: true,
 		compat: PROVIDER_COMPAT,
 		models,
