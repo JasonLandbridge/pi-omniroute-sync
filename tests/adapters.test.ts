@@ -1,18 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createOmniExtension, PiInput, OmpInput } = vi.hoisted(() => {
+const { createOmniExtension, PiInput } = vi.hoisted(() => {
 	class Input {
 		private value = "";
 		handleInput(value: string) { this.value += value; }
 		setValue(value: string) { this.value = value; }
 		getValue() { return this.value; }
 	}
-	return { createOmniExtension: vi.fn(async () => undefined), PiInput: Input, OmpInput: Input };
+	return { createOmniExtension: vi.fn(async () => undefined), PiInput: Input };
 });
 vi.mock("../src/extension.ts", () => ({ createOmniExtension }));
 vi.mock("@earendil-works/pi-tui", () => ({ Input: PiInput, matchesKey: (data: string, key: string) => data === "\r" && key === "enter" }));
-vi.mock("@oh-my-pi/pi-tui/components/input", () => ({ Input: OmpInput }));
-vi.mock("@oh-my-pi/pi-tui/keys", () => ({ matchesKey: (data: string, key: string) => data === "\r" && key === "enter" }));
 
 import ompExtension from "../src/omp.ts";
 import piExtension from "../src/pi.ts";

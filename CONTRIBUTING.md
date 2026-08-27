@@ -78,6 +78,7 @@ Do not document separate state files or configuration paths unless the implement
 ## Coding Rules
 
 - Keep host adapters in `src/pi.ts` and `src/omp.ts`.
+- The OMP adapter uses the `@earendil-works/pi-tui` compatibility scope so OMP's plugin loader can resolve TUI imports through its legacy package shim.
 - Put shared behavior in the narrowest existing module under `src/`.
 - Preserve the normal `/model <model-id>` experience and the single `omni` provider.
 - Use the host's native Responses implementation and TUI input/key handling.

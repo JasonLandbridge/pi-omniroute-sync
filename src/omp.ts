@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import { Input } from "@oh-my-pi/pi-tui/components/input";
-import { matchesKey } from "@oh-my-pi/pi-tui/keys";
+import { Input, matchesKey } from "@earendil-works/pi-tui";
 import type { OmniPI } from "./contracts.ts";
 import { createOmniExtension } from "./extension.ts";
 

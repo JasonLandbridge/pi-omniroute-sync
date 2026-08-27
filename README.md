@@ -414,6 +414,8 @@ Package entry points:
 | Pi | `src/pi.ts` |
 | OMP | `src/omp.ts` |
 
+The OMP adapter uses the `@earendil-works/pi-tui` compatibility scope so OMP can resolve its TUI imports through the host's built-in legacy package shim. This keeps the package compatible with OMP's isolated plugin installation without adding a duplicate TUI dependency.
+
 Core implementation:
 
 | File | Responsibility |
