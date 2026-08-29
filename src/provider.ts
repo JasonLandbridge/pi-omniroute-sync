@@ -102,7 +102,7 @@ async function requestJson<T>(
 
 export async function checkHealth(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {
 	try {
-		const res = await fetch(`${config.serverUrl}/v1/models`, {
+		const res = await fetch(`${config.serverUrl}/api/health/ping`, {
 			headers: authHeaders(config),
 			signal: requestSignal(3_000, signal),
 		});

@@ -17,7 +17,7 @@
 - Optional global `auto` and `auto/*` routing models.
 - Real cost metadata from OmniRoute's pricing API.
 - Secure extension-owned settings; API keys are never copied to `models.json`.
-- Health status, model browsing, and direct model testing commands.
+- Health status, model browsing, and direct model testing commands. Health checks use OmniRoute's lightweight `/api/health/ping` endpoint instead of downloading the full model catalog.
 
 ## Requirements
 
@@ -347,6 +347,8 @@ Then check:
 ```text
 /omni
 ```
+
+The footer health status uses OmniRoute's lightweight `/api/health/ping` endpoint, while `/v1/models` is reserved for synchronization.
 
 ### A provider's models are missing
 

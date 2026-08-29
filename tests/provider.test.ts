@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, PROVIDER_COMPAT, registerOmniProvider, shouldIncludeModel, usableProviderAliases } from "../src/provider.ts";
+import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, PROVIDER_COMPAT, registerOmniProvider, shouldIncludeModel, usableProviderAliases } from "../src/provider.ts";
 
 const fetchStub = vi.spyOn(globalThis, "fetch");
 
@@ -10,6 +10,16 @@ afterEach(() => fetchStub.mockReset());
 
 it("uses OmniRoute's supported session-affinity header", () => {
 	expect(PROVIDER_COMPAT.sessionAffinityFormat).toBe("openrouter");
+});
+
+it("checks OmniRoute's lightweight health endpoint", async () => {
+	fetchStub.mockResolvedValue(new Response(null, { status: 200 }));
+
+	expect(await checkHealth({ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" })).toBe(true);
+	expect(fetchStub).toHaveBeenCalledWith(
+		"http://localhost:20128/api/health/ping",
+		expect.objectContaining({ headers: { Authorization: "Bearer secret" } }),
+	);
 });
 
 it("normalizes legacy persisted models for Responses and cost tiers", () => {
