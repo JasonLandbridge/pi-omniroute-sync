@@ -15,6 +15,7 @@ const baseSettings: OmniSettings = {
 	excludeModels: [],
 	syncOnStartup: true,
 	modelCacheTtlMinutes: 60,
+	autoSyncIntervalMs: 300000,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "secret",
 };

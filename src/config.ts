@@ -18,6 +18,8 @@ export interface OmniSettings {
 	excludeModels: string[];
 	syncOnStartup: boolean;
 	modelCacheTtlMinutes: number;
+	/** Background catalog refresh while the host is running. 0 disables. Default 300000. */
+	autoSyncIntervalMs: number;
 	lastSuccessfulSyncAt: number;
 	apiKey: string;
 }
@@ -32,6 +34,7 @@ const DEFAULT_SETTINGS: OmniSettings = {
 	excludeModels: [],
 	syncOnStartup: true,
 	modelCacheTtlMinutes: 60,
+	autoSyncIntervalMs: 300_000,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "",
 };
@@ -51,6 +54,14 @@ export function settingsPath(agentHome: string): string {
 	return join(agentHome, "extensions", EXTENSION_STATE_DIR, "settings.json");
 }
 
+export function sanitizeAutoSyncIntervalMs(value: unknown): number {
+	if (value === undefined || value === null || value === "") return DEFAULT_SETTINGS.autoSyncIntervalMs;
+	const n = typeof value === "number" ? value : Number(String(value).trim());
+	if (!Number.isFinite(n) || n < 0) return DEFAULT_SETTINGS.autoSyncIntervalMs;
+	if (n === 0) return 0;
+	return Math.max(60_000, Math.floor(n));
+}
+
 export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
 	return {
 		serverUrl: normalizeServerUrl(String(input.serverUrl || DEFAULT_SETTINGS.serverUrl)),
@@ -64,6 +75,7 @@ export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
 			Number.isFinite(input.modelCacheTtlMinutes) && input.modelCacheTtlMinutes! >= 0
 				? input.modelCacheTtlMinutes!
 				: DEFAULT_SETTINGS.modelCacheTtlMinutes,
+		autoSyncIntervalMs: sanitizeAutoSyncIntervalMs(input.autoSyncIntervalMs),
 		lastSuccessfulSyncAt:
 			Number.isFinite(input.lastSuccessfulSyncAt) && input.lastSuccessfulSyncAt! >= 0 ? input.lastSuccessfulSyncAt! : 0,
 		apiKey: String(input.apiKey ?? ""),

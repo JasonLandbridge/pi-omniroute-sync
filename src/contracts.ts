@@ -43,10 +43,22 @@ export interface OmniContext {
 	ui: OmniUI;
 }
 
+export type ProviderApi = "openai-completions" | "openai-responses";
+
+export interface OmniThinking {
+	mode: "effort";
+	efforts: string[];
+}
+
+export interface ProviderCompat {
+	sessionAffinityFormat?: "openrouter" | "openai";
+	promptCacheSessionHeader?: string;
+}
+
 export interface ProviderModelConfig {
 	id: string;
 	name: string;
-	api: "openai-responses";
+	api: ProviderApi;
 	reasoning: boolean;
 	input: string[];
 	cost: {
@@ -64,18 +76,19 @@ export interface ProviderModelConfig {
 	};
 	contextWindow: number;
 	maxTokens: number;
+	omitMaxOutputTokens?: boolean;
+	supportsTools?: boolean;
+	thinking?: OmniThinking;
+	compat?: ProviderCompat;
 }
 
 export interface ProviderEntry {
 	baseUrl: string;
 	apiKey: string;
-	api: "openai-responses";
+	api: ProviderApi;
 	auth?: "apiKey" | "none" | "oauth";
 	authHeader: boolean;
-	compat: {
-		sessionAffinityFormat: "openrouter";
-		supportsLongCacheRetention: true;
-	};
+	compat: ProviderCompat;
 	models: ProviderModelConfig[];
 }
 
@@ -114,4 +127,6 @@ export interface AgentHomeOptions {
 	defaultHome: string;
 	matchesKey(data: string, key: string): boolean;
 	createInput(initialValue: string): OmniInput;
+	/** Wire API for OmniRoute. OMP uses chat completions; Pi defaults to Responses. */
+	inferenceApi?: ProviderApi;
 }

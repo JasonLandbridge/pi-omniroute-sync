@@ -45,7 +45,7 @@ it("persists a keyless OMP marker without leaking the API key", async () => {
 		{ registerProvider } as never,
 		agentHome,
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalMs: 300000, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 
 	const persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
@@ -144,4 +144,52 @@ it("maps active canonical providers to pricing aliases", () => {
 
 	expect([...aliases].sort()).toEqual(["anthropic", "claude"]);
 	expect([...usableProviderAliases([{ provider: "openai", isActive: true }], [])]).toEqual(["openai"]);
+});
+
+
+it("maps vision capabilities, limits, and pricing from the catalog", async () => {
+	fetchStub.mockImplementation(async (input) => {
+		const url = String(input);
+		if (url.endsWith("/v1/models")) {
+			return new Response(JSON.stringify({
+				data: [
+					{ id: "openai/gpt-vision", name: "Vision", capabilities: { vision: true, tool_calling: true }, effort_tiers: ["low", "high"], context_length: 200000, max_output_tokens: 64000 },
+					{ id: "google/audio-only", name: "Audio", type: "audio" },
+				],
+			}), { status: 200 });
+		}
+		if (url.includes("/api/pricing")) {
+			return new Response(JSON.stringify({ openai: { "gpt-vision": { input: 5, output: 15 } } }), { status: 200 });
+		}
+		return new Response("{}", { status: 200 });
+	});
+	const { discoverModels } = await import("../src/provider.ts");
+	const models = await discoverModels(
+		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalMs: 300000, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+	);
+	const vision = models.find((model) => model.id === "openai/gpt-vision");
+	expect(vision?.input).toEqual(["text", "image"]);
+	expect(vision?.supportsTools).toBe(true);
+	expect(vision?.thinking?.efforts).toEqual(["low", "high"]);
+	expect(vision?.contextWindow).toBe(200000);
+	expect(vision?.maxTokens).toBe(64000);
+	expect(vision?.cost.input).toBe(5);
+	expect(models.some((model) => model.id === "google/audio-only")).toBe(false);
+});
+
+it("keeps advertised models when usable-provider verification fails", async () => {
+	fetchStub.mockImplementation(async (input) => {
+		const url = String(input);
+		if (url.endsWith("/v1/models")) {
+			return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5", name: "GPT-5" }] }), { status: 200 });
+		}
+		return new Response("nope", { status: 403 });
+	});
+	const { discoverModels } = await import("../src/provider.ts");
+	const models = await discoverModels(
+		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
+		{ onlyShowUsableModels: true, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalMs: 300000, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+	);
+	expect(models.some((model) => model.id === "openai/gpt-5")).toBe(true);
 });

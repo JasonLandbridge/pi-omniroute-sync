@@ -33,6 +33,7 @@ describe("sanitizeSettings", () => {
 			includeModels: ["openai/*"],
 			excludeModels: ["*/legacy"],
 			modelCacheTtlMinutes: 60,
+			autoSyncIntervalMs: 300000,
 			lastSuccessfulSyncAt: 0,
 		});
 	});
@@ -53,6 +54,7 @@ describe("loadSettings", () => {
 			excludeModels: [],
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
+			autoSyncIntervalMs: 300000,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "",
 		});
@@ -73,6 +75,7 @@ describe("loadSettings", () => {
 			excludeModels: [],
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
+			autoSyncIntervalMs: 300000,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "",
 		});
@@ -97,6 +100,7 @@ describe("saveConfig", () => {
 			excludeModels: [],
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
+			autoSyncIntervalMs: 300000,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "secret",
 		});
