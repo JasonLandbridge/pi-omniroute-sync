@@ -14,7 +14,7 @@ import {
 import { ConfigDialog, summarizeModels, type ModelSummary } from "./config-dialog.ts";
 import type { AgentHomeOptions, OmniContext, OmniPI, ProviderModelConfig } from "./contracts.ts";
 import { AUTO_MODELS, checkHealth, checkModelsEndpoint, discoverModels, isSyncStale, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
-import { formatGatewayTokensPerSecond, tokensPerSecondFromUsage } from "./gateway-telemetry.ts";
+import { registerGatewayTelemetry } from "./gateway-telemetry.ts";
 
 function sortKey(id: string): string {
 	const autoIndex = AUTO_MODELS.indexOf(id);
@@ -229,6 +229,7 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	}
 
 	reloadOmniProvider(pi, agentHome, config);
+	registerGatewayTelemetry(pi as never);
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;
@@ -268,15 +269,6 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		healthTimer = undefined;
 		stopAutoSync();
 		sessionCtx = undefined;
-	});
-
-	const settled = pi as OmniPI & {
-		on(event: "agent_settled", handler: (event: { messages?: Array<{ usage?: unknown }> }, ctx: OmniContext) => void): void;
-	};
-	settled.on("agent_settled", (event, ctx) => {
-		const usages = (event.messages ?? []).map((message) => message.usage);
-		const tps = usages.map(tokensPerSecondFromUsage).find((value) => value !== undefined);
-		if (ctx.hasUI) ctx.ui.notify(`tok/s ${formatGatewayTokensPerSecond(tps)}`, "info");
 	});
 
 	pi.on("model_select", (event, ctx) => {

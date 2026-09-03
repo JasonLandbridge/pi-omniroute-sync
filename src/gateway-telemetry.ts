@@ -17,6 +17,58 @@ export function parseOmniRouteToksHeader(headers: Headers): number | undefined {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+export function wrapFetchCaptureTokensPerSecond(
+	fetchImpl: typeof fetch,
+	onCapture: (tps: number) => void,
+): typeof fetch {
+	return async (input, init) => {
+		const response = await fetchImpl(input, init);
+		const tps = parseOmniRouteToksHeader(response.headers);
+		if (tps !== undefined) onCapture(tps);
+		return response;
+	};
+}
+
 export function formatGatewayTokensPerSecond(tps: number | undefined): string {
 	return tps === undefined ? "—" : tps.toFixed(1);
+}
+
+export function registerGatewayTelemetry(pi: {
+	on(event: string, handler: (...args: never[]) => unknown): void;
+}): void {
+	let captured: number | undefined;
+	let restoreFetch: (() => void) | undefined;
+
+	const install = () => {
+		if (restoreFetch) return;
+		const originalFetch = globalThis.fetch.bind(globalThis);
+		globalThis.fetch = wrapFetchCaptureTokensPerSecond(originalFetch, (tps) => {
+			captured = tps;
+		});
+		restoreFetch = () => {
+			globalThis.fetch = originalFetch;
+		};
+	};
+
+	pi.on("session_start", (() => {
+		captured = undefined;
+		install();
+	}) as (...args: never[]) => unknown);
+
+	pi.on("agent_settled", ((event: unknown, ctx: unknown) => {
+		const payload = event as { messages?: Array<{ usage?: unknown }> };
+		const ui = ctx as { hasUI?: boolean; ui?: { notify?: (message: string, type?: string) => void } };
+		const fromUsage = (payload.messages ?? [])
+			.map((message) => tokensPerSecondFromUsage(message.usage))
+			.find((value) => value !== undefined);
+		const tps = captured ?? fromUsage;
+		if (ui.hasUI) ui.ui?.notify?.(`tok/s ${formatGatewayTokensPerSecond(tps)}`, "info");
+		captured = undefined;
+	}) as (...args: never[]) => unknown);
+
+	pi.on("session_shutdown", (() => {
+		restoreFetch?.();
+		restoreFetch = undefined;
+		captured = undefined;
+	}) as (...args: never[]) => unknown);
 }
