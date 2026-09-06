@@ -138,6 +138,8 @@ Default settings:
   "autoSyncIntervalSeconds": 300,
   "showGatewayTokensPerSecond": false,
   "lastSuccessfulSyncAt": 0,
+  "onUnreachable": "none",
+  "fallbackModel": "",
   "apiKey": ""
 }
 ```
@@ -157,6 +159,8 @@ Default settings:
 | `autoSyncIntervalSeconds` | number | `300` | Background catalog refresh interval in seconds while a session is running. Configure it in `/omni config` or `/omni autosync`; `0` disables autosync. |
 | `showGatewayTokensPerSecond` | boolean | `false` | Displays gateway-reported tok/s after OmniRoute turns when enabled. Configure it in `/omni config`; disabling it does not affect inference requests. |
 | `lastSuccessfulSyncAt` | number | `0` | Unix timestamp in milliseconds maintained automatically after successful syncs. `0` means no successful sync has been recorded. |
+| `onUnreachable` | `"none"` \| `"host-fallback"` | `none` | When `host-fallback`, probe the configured `serverUrl` before send and hop to `fallbackModel` if the gateway is down or times out. |
+| `fallbackModel` | string | empty | Host `provider/id` for the on-unreachable hop, for example `anthropic/claude-sonnet-4`. Empty means notify only. |
 | `apiKey` | string | empty | Bearer token sent to OmniRoute. Stored only in the protected extension settings file. |
 
 
@@ -291,9 +295,11 @@ Runtime configuration can be overridden with environment variables:
 
 | Variable | Overrides |
 |---|---|
-| `OMNIROUTE_URL` | `serverUrl` |
+| `OMNIROUTE_URL` | `serverUrl` (runtime provider registration only; health/hop probes still use the configured settings `serverUrl` after `/omni setup`) |
 | `OMNIROUTE_API_KEY` | `apiKey` |
 | `OMNIROUTE_PROVIDER_NAME` | `providerName` |
+| `OMNIROUTE_ON_UNREACHABLE` | `onUnreachable` |
+| `OMNIROUTE_FALLBACK_MODEL` | `fallbackModel` |
 
 Example:
 
@@ -303,7 +309,37 @@ OMNIROUTE_API_KEY=secret \
 pi
 ```
 
-Environment values take precedence when the extension loads runtime configuration. They are not written back to the private settings file or `models.json`.
+Environment values take precedence when the extension loads runtime configuration. They are not written back to the private settings file or `models.json`. Health and on-unreachable probes use the configured settings `serverUrl` after `/omni setup`, not only `OMNIROUTE_URL`.
+
+## Unreachable hop and host fallback
+
+Catalog sync and the footer health status do not switch the active model by themselves. When OmniRoute is down or timing out, the next send still goes to `omni` unless you hop.
+
+This package does **not** register a second OmniRoute provider. Model switching stays:
+
+```text
+/model <model-id>
+```
+
+Optional settings automate that host switch:
+
+```json
+{
+  "onUnreachable": "host-fallback",
+  "fallbackModel": "anthropic/claude-sonnet-4"
+}
+```
+
+Behavior:
+
+1. Before a send (`before_agent_start`), probe the configured `serverUrl` with `/api/health/ping`.
+2. After a provider response that looks like a connect/timeout/5xx failure, treat the gateway as unreachable.
+3. If the active model is still `omni` and `onUnreachable` is `host-fallback`, call the host `setModel` API for `fallbackModel`.
+4. If the host provider is not authenticated, the extension notifies and leaves the current model unchanged. Use `/model anthropic/claude-sonnet-4` (or another already-logged-in host model) manually.
+
+`onUnreachable: "none"` (the default) keeps today's status-only behavior.
+
+The community plugin `md-riaz/omniroute-agent-extension` has the same catalog-sync plus health-status shape and also does not hop. Enable only one OmniRoute extension at a time.
 
 For normal startup synchronization and complete configuration management, run `/omni setup` once so the extension-owned settings file exists. You can then keep secrets in environment variables if preferred.
 
@@ -381,7 +417,9 @@ Then check:
 /omni
 ```
 
-The footer health status uses OmniRoute's lightweight `/api/health/ping` endpoint, while `/v1/models` is reserved for synchronization.
+The footer health status uses OmniRoute's lightweight `/api/health/ping` endpoint, while `/v1/models` is reserved for synchronization. The same ping is used for on-unreachable probes against the configured `serverUrl`.
+
+If the gateway stays down and you have another host provider authenticated, either run `/model <provider/id>` or set `onUnreachable` to `host-fallback` with a `fallbackModel`.
 
 ### A provider's models are missing
 
@@ -450,7 +488,7 @@ bun run test
 
 The release workflow runs semantic-release with Node.js 24.10.0 or newer because current semantic-release versions do not support Bun's Node compatibility runtime.
 
-The test suite imports both Pi and OMP package entry points and covers their host-specific adapters, secure configuration, model normalization, strict provider filtering, provider aliases, global route filtering, glob matching, pricing mapping, startup staleness, staged dialog behavior, native input handling, and save/discard semantics. This unit coverage replaces a separate import-only smoke script.
+The test suite imports both Pi and OMP package entry points and covers their host-specific adapters, secure configuration, model normalization, strict provider filtering, provider aliases, global route filtering, glob matching, pricing mapping, startup staleness, staged dialog behavior, native input handling, save/discard semantics, configured-URL health probes, and optional on-unreachable host fallback. This unit coverage replaces a separate import-only smoke script.
 
 Package entry points:
 
@@ -467,6 +505,7 @@ Core implementation:
 |---|---|
 | `src/extension.ts` | Lifecycle hooks, commands, agent tools, setup, status, and dialog orchestration. |
 | `src/provider.ts` | HTTP requests, discovery, filtering, pricing, provider registration, persistence, and startup staleness. |
+| `src/unreachable.ts` | Configured-URL probe cache and optional host-fallback hop. |
 | `src/config-dialog.ts` | Staged tabbed overlay and host-native inline editing. |
 | `src/config.ts` | Defaults, environment overrides, paths, normalization, and secure settings persistence. |
 | `src/contracts.ts` | Minimal host-neutral contracts used by both adapters. |

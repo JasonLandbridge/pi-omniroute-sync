@@ -18,6 +18,8 @@ const baseSettings: OmniSettings = {
 	autoSyncIntervalSeconds: 300,
 	showGatewayTokensPerSecond: true,
 	lastSuccessfulSyncAt: 0,
+	onUnreachable: "none",
+	fallbackModel: "",
 	apiKey: "secret",
 };
 const UP = ["\x1b[A", "\x1bOA", "\x1b[57419u", "\x1b[1;1A"];

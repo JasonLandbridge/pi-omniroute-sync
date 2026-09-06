@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadConfig, loadSettings, sanitizeConfig, sanitizeSettings, saveConfig, settingsPath, type OmniSettings } from "../src/config.ts";
+import { loadConfig, loadHopSettings, loadProbeConfig, loadSettings, sanitizeConfig, sanitizeSettings, saveConfig, settingsPath, type OmniSettings } from "../src/config.ts";
 
 describe("sanitizeConfig", () => {
 	it("uses defaults when nothing is provided", () => {
@@ -67,6 +67,8 @@ describe("loadSettings", () => {
 			autoSyncIntervalSeconds: 300,
 			showGatewayTokensPerSecond: false,
 			lastSuccessfulSyncAt: 0,
+			onUnreachable: "none",
+			fallbackModel: "",
 			apiKey: "",
 		});
 	});
@@ -89,6 +91,8 @@ describe("loadSettings", () => {
 			autoSyncIntervalSeconds: 300,
 			showGatewayTokensPerSecond: false,
 			lastSuccessfulSyncAt: 0,
+			onUnreachable: "none",
+			fallbackModel: "",
 			apiKey: "",
 		});
 	});
@@ -115,10 +119,76 @@ describe("saveConfig", () => {
 			autoSyncIntervalSeconds: 300,
 			showGatewayTokensPerSecond: false,
 			lastSuccessfulSyncAt: 0,
+			onUnreachable: "none",
+			fallbackModel: "",
 			apiKey: "secret",
 		});
 		expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
 		expect(statSync(path).mode & 0o777).toBe(0o600);
 		expect(loadConfig(agentHome)).toEqual({ serverUrl: "http://example.com", providerName: "custom", apiKey: "secret" });
+	});
+});
+
+describe("unreachable hop settings", () => {
+	it("accepts host-fallback and a host model id", () => {
+		expect(sanitizeSettings({
+			onUnreachable: "host-fallback",
+			fallbackModel: " anthropic/claude-sonnet-4 ",
+		})).toMatchObject({
+			onUnreachable: "host-fallback",
+			fallbackModel: "anthropic/claude-sonnet-4",
+		});
+	});
+
+	it("rejects unknown onUnreachable values", () => {
+		expect(sanitizeSettings({ onUnreachable: "switch-provider" as never }).onUnreachable).toBe("none");
+	});
+
+	it("probes the configured settings serverUrl even when OMNIROUTE_URL is unset", () => {
+		const agentHome = mkdtempSync(join(tmpdir(), "pi-omni-probe-"));
+		saveConfig(agentHome, { serverUrl: "http://gateway.example:20128", providerName: "omni", apiKey: "" });
+		const previous = process.env.OMNIROUTE_URL;
+		delete process.env.OMNIROUTE_URL;
+		try {
+			expect(loadProbeConfig(agentHome).serverUrl).toBe("http://gateway.example:20128");
+		} finally {
+			if (previous === undefined) delete process.env.OMNIROUTE_URL;
+			else process.env.OMNIROUTE_URL = previous;
+		}
+	});
+
+	it("prefers the configured settings serverUrl over OMNIROUTE_URL for probes", () => {
+		const agentHome = mkdtempSync(join(tmpdir(), "pi-omni-probe-env-"));
+		saveConfig(agentHome, { serverUrl: "http://configured.example", providerName: "omni", apiKey: "" });
+		const previous = process.env.OMNIROUTE_URL;
+		process.env.OMNIROUTE_URL = "http://env-only.example";
+		try {
+			expect(loadConfig(agentHome).serverUrl).toBe("http://env-only.example");
+			expect(loadProbeConfig(agentHome).serverUrl).toBe("http://configured.example");
+		} finally {
+			if (previous === undefined) delete process.env.OMNIROUTE_URL;
+			else process.env.OMNIROUTE_URL = previous;
+		}
+	});
+
+	it("reads hop overrides from the environment without writing them to settings", () => {
+		const agentHome = mkdtempSync(join(tmpdir(), "pi-omni-hop-"));
+		saveConfig(agentHome, { serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "" });
+		const previousAction = process.env.OMNIROUTE_ON_UNREACHABLE;
+		const previousModel = process.env.OMNIROUTE_FALLBACK_MODEL;
+		process.env.OMNIROUTE_ON_UNREACHABLE = "host-fallback";
+		process.env.OMNIROUTE_FALLBACK_MODEL = "openai/gpt-5";
+		try {
+			expect(loadHopSettings(agentHome)).toEqual({
+				onUnreachable: "host-fallback",
+				fallbackModel: "openai/gpt-5",
+			});
+			expect(loadSettings(agentHome).onUnreachable).toBe("none");
+		} finally {
+			if (previousAction === undefined) delete process.env.OMNIROUTE_ON_UNREACHABLE;
+			else process.env.OMNIROUTE_ON_UNREACHABLE = previousAction;
+			if (previousModel === undefined) delete process.env.OMNIROUTE_FALLBACK_MODEL;
+			else process.env.OMNIROUTE_FALLBACK_MODEL = previousModel;
+		}
 	});
 });

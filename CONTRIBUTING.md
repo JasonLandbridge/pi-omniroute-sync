@@ -65,6 +65,7 @@ The test suite covers:
 - Startup synchronization staleness and TTL boundaries.
 - Autosync lifecycle, interval validation, setup activation, shutdown cleanup, and environment-secret preservation.
 - Gateway telemetry header and final-stream parsing, provider scoping, missing-value handling, stale-value protection, and display-setting toggling.
+- Configured `serverUrl` health probes (not only `OMNIROUTE_URL`) and optional on-unreachable host fallback.
 - Config-dialog navigation, staged editing, native key handling, masking, validation, autosync interval editing, save/discard behavior, and in-place synchronization.
 
 For behavior that depends on a real OmniRoute deployment, also verify `/omni setup`, `/omni sync`, `/omni test <model>`, and model selection manually.
