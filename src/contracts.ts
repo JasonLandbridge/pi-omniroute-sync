@@ -36,14 +36,27 @@ export interface OmniUI {
 	setStatus(key: string, text: string | undefined): void;
 }
 
+export interface OmniRequestModel {
+	provider?: string;
+	omitMaxOutputTokens?: boolean;
+	supportsTools?: boolean;
+}
+
+export interface ProviderRequestEvent {
+	payload: unknown;
+}
+
 export interface OmniContext {
 	hasUI: boolean;
 	mode: "tui" | "rpc" | "json" | "print";
+	model?: OmniRequestModel;
 	signal?: AbortSignal;
 	ui: OmniUI;
 }
 
 export type ProviderApi = "openai-completions" | "openai-responses";
+export type ProviderThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ProviderThinkingLevelMap = Partial<Record<ProviderThinkingLevel, string | null>>;
 
 export interface OmniThinking {
 	mode: "effort";
@@ -53,6 +66,8 @@ export interface OmniThinking {
 export interface ProviderCompat {
 	sessionAffinityFormat?: "openrouter" | "openai";
 	promptCacheSessionHeader?: string;
+	supportsLongCacheRetention?: boolean;
+	supportsMaxOutputTokens?: boolean;
 }
 
 export interface ProviderModelConfig {
@@ -78,6 +93,7 @@ export interface ProviderModelConfig {
 	maxTokens: number;
 	omitMaxOutputTokens?: boolean;
 	supportsTools?: boolean;
+	thinkingLevelMap?: ProviderThinkingLevelMap;
 	thinking?: OmniThinking;
 	compat?: ProviderCompat;
 }
@@ -115,6 +131,7 @@ export interface OmniPI {
 		},
 	): void;
 	on(event: "session_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "before_provider_request", handler: (event: ProviderRequestEvent, ctx: OmniContext) => unknown | Promise<unknown>): void;
 	on(event: "session_shutdown", handler: () => void): void;
 	on(
 		event: "model_select",

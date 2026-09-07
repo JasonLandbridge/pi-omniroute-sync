@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadConfig, loadSettings, sanitizeConfig, sanitizeSettings, saveConfig, settingsPath } from "../src/config.ts";
+import { loadConfig, loadSettings, sanitizeConfig, sanitizeSettings, saveConfig, settingsPath, type OmniSettings } from "../src/config.ts";
 
 describe("sanitizeConfig", () => {
 	it("uses defaults when nothing is provided", () => {
@@ -33,10 +33,19 @@ describe("sanitizeSettings", () => {
 			includeModels: ["openai/*"],
 			excludeModels: ["*/legacy"],
 			modelCacheTtlMinutes: 60,
-			autoSyncIntervalMs: 300000,
+			autoSyncIntervalSeconds: 300,
 			lastSuccessfulSyncAt: 0,
 		});
 	});
+});
+
+it("normalizes persisted auto-sync values at the settings boundary", () => {
+	expect(sanitizeSettings({ autoSyncIntervalSeconds: 12_345.9 })).toMatchObject({ autoSyncIntervalSeconds: 12_345 });
+	expect(sanitizeSettings({ autoSyncIntervalSeconds: 0 })).toMatchObject({ autoSyncIntervalSeconds: 0 });
+	expect(sanitizeSettings({ autoSyncIntervalSeconds: -1 })).toMatchObject({ autoSyncIntervalSeconds: 300 });
+	expect(sanitizeSettings({ autoSyncIntervalSeconds: Number.NaN })).toMatchObject({ autoSyncIntervalSeconds: 300 });
+	expect(sanitizeSettings({ autoSyncIntervalSeconds: "12345" as unknown as number })).toMatchObject({ autoSyncIntervalSeconds: 300 });
+	expect(sanitizeSettings({ autoSyncIntervalMs: 120_000 } as Partial<OmniSettings> & { autoSyncIntervalMs: number })).toMatchObject({ autoSyncIntervalSeconds: 120 });
 });
 
 describe("loadSettings", () => {
@@ -54,7 +63,7 @@ describe("loadSettings", () => {
 			excludeModels: [],
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
-			autoSyncIntervalMs: 300000,
+			autoSyncIntervalSeconds: 300,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "",
 		});
@@ -75,7 +84,7 @@ describe("loadSettings", () => {
 			excludeModels: [],
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
-			autoSyncIntervalMs: 300000,
+			autoSyncIntervalSeconds: 300,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "",
 		});
@@ -100,7 +109,7 @@ describe("saveConfig", () => {
 			excludeModels: [],
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
-			autoSyncIntervalMs: 300000,
+			autoSyncIntervalSeconds: 300,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "secret",
 		});

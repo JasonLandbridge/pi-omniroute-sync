@@ -18,8 +18,8 @@ export interface OmniSettings {
 	excludeModels: string[];
 	syncOnStartup: boolean;
 	modelCacheTtlMinutes: number;
-	/** Background catalog refresh while the host is running. 0 disables. Default 300000. */
-	autoSyncIntervalMs: number;
+	/** Background catalog refresh while the host is running. 0 disables. Default 300 seconds. */
+	autoSyncIntervalSeconds: number;
 	lastSuccessfulSyncAt: number;
 	apiKey: string;
 }
@@ -34,7 +34,7 @@ const DEFAULT_SETTINGS: OmniSettings = {
 	excludeModels: [],
 	syncOnStartup: true,
 	modelCacheTtlMinutes: 60,
-	autoSyncIntervalMs: 300_000,
+	autoSyncIntervalSeconds: 300,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "",
 };
@@ -54,15 +54,10 @@ export function settingsPath(agentHome: string): string {
 	return join(agentHome, "extensions", EXTENSION_STATE_DIR, "settings.json");
 }
 
-export function sanitizeAutoSyncIntervalMs(value: unknown): number {
-	if (value === undefined || value === null || value === "") return DEFAULT_SETTINGS.autoSyncIntervalMs;
-	const n = typeof value === "number" ? value : Number(String(value).trim());
-	if (!Number.isFinite(n) || n < 0) return DEFAULT_SETTINGS.autoSyncIntervalMs;
-	if (n === 0) return 0;
-	return Math.max(60_000, Math.floor(n));
-}
-
 export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
+	// Accept settings written by the short-lived millisecond version of autosync.
+	const legacyIntervalMs = (input as { autoSyncIntervalMs?: unknown }).autoSyncIntervalMs;
+	const intervalSeconds = input.autoSyncIntervalSeconds ?? (typeof legacyIntervalMs === "number" ? legacyIntervalMs / 1000 : undefined);
 	return {
 		serverUrl: normalizeServerUrl(String(input.serverUrl || DEFAULT_SETTINGS.serverUrl)),
 		providerName: String(input.providerName || DEFAULT_SETTINGS.providerName).trim() || DEFAULT_SETTINGS.providerName,
@@ -75,7 +70,10 @@ export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
 			Number.isFinite(input.modelCacheTtlMinutes) && input.modelCacheTtlMinutes! >= 0
 				? input.modelCacheTtlMinutes!
 				: DEFAULT_SETTINGS.modelCacheTtlMinutes,
-		autoSyncIntervalMs: sanitizeAutoSyncIntervalMs(input.autoSyncIntervalMs),
+		autoSyncIntervalSeconds:
+			typeof intervalSeconds === "number" && Number.isFinite(intervalSeconds) && intervalSeconds >= 0
+				? Math.floor(intervalSeconds)
+				: DEFAULT_SETTINGS.autoSyncIntervalSeconds,
 		lastSuccessfulSyncAt:
 			Number.isFinite(input.lastSuccessfulSyncAt) && input.lastSuccessfulSyncAt! >= 0 ? input.lastSuccessfulSyncAt! : 0,
 		apiKey: String(input.apiKey ?? ""),

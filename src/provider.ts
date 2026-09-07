@@ -1,17 +1,19 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { modelsJsonPath, saveSettings, type OmniConfig, type OmniSettings } from "./config.ts";
-import type { OmniPI, OmniThinking, ProviderApi, ProviderCompat, ProviderEntry, ProviderModelConfig } from "./contracts.ts";
+import type { OmniPI, OmniRequestModel, OmniThinking, ProviderApi, ProviderCompat, ProviderEntry, ProviderModelConfig, ProviderThinkingLevel, ProviderThinkingLevelMap } from "./contracts.ts";
 
 const DEFAULT_PROVIDER_API: ProviderApi = "openai-responses";
 export const PROVIDER_COMPAT: ProviderCompat = {
 	sessionAffinityFormat: "openrouter",
 	promptCacheSessionHeader: "x-session-id",
+	supportsLongCacheRetention: true,
 };
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tiers: [] } as const;
-const OMP_EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+const THINKING_LEVELS: ProviderThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+const OMP_EFFORTS = new Set<string>(THINKING_LEVELS);
 const VISUAL_MODALITIES = new Set(["image", "pdf", "video"]);
-const NON_CHAT_TYPES = new Set(["image", "embedding", "rerank", "audio", "video"]);
+const NON_CHAT_TYPES = new Set(["image", "embedding", "rerank", "audio", "video", "pdf"]);
 export const AUTO_MODELS = [
 	"auto",
 	"auto/coding",
@@ -23,32 +25,23 @@ export const AUTO_MODELS = [
 	"auto/best-chaos",
 	"auto/best-chat",
 	"auto/best-coding",
-	"auto/best-coding-fast",
-	"auto/best-reasoning",
-	"auto/best-fast",
-	"auto/best-vision",
-	"auto/best-free",
-	"auto/pro-coding",
-	"auto/pro-reasoning",
-	"auto/pro-fast",
-	"auto/pro-vision",
-	"auto/pro-chat",
-	"auto/reasoning",
-	"auto/reasoning:pro",
-	"auto/vision",
-	"auto/multimodal",
-	"auto/claude-opus",
-	"auto/claude-sonnet",
 ];
 
 let activeInferenceApi: ProviderApi = DEFAULT_PROVIDER_API;
 
-export function setInferenceApi(api: ProviderApi | undefined): void {
+export function setInferenceApi(api?: ProviderApi): void {
 	activeInferenceApi = api === "openai-completions" ? "openai-completions" : DEFAULT_PROVIDER_API;
 }
 
 function providerApi(): ProviderApi {
 	return activeInferenceApi;
+}
+
+function modelCompat(omitMaxOutputTokens = false): ProviderCompat {
+	return {
+		...PROVIDER_COMPAT,
+		...(providerApi() === DEFAULT_PROVIDER_API && omitMaxOutputTokens ? { supportsMaxOutputTokens: false } : {}),
+	};
 }
 
 interface OmniApiModel {
@@ -67,6 +60,8 @@ interface OmniApiModel {
 		supportsThinking?: boolean;
 		vision?: boolean;
 		attachment?: boolean;
+		pdf?: boolean;
+		video?: boolean;
 		tool_calling?: boolean;
 		effort_tiers?: unknown;
 	};
@@ -89,6 +84,7 @@ interface SyncedModel {
 	reasoning?: boolean;
 	supportsTools?: boolean;
 	thinking?: OmniThinking;
+	thinkingLevelMap?: ProviderThinkingLevelMap;
 	input?: string[];
 }
 
@@ -141,6 +137,32 @@ async function requestJson<T>(
 	return (text ? JSON.parse(text) : {}) as T;
 }
 
+/** Older hosts build these fields without reading newer catalog capability metadata. */
+export function transformProviderPayload(payload: unknown, model: OmniRequestModel | undefined, providerName: string): unknown {
+	if (!model || model.provider !== providerName || typeof payload !== "object" || payload === null || Array.isArray(payload)) return payload;
+
+	const next = { ...(payload as Record<string, unknown>) };
+	let changed = false;
+	const remove = (key: string): void => {
+		if (key in next) {
+			delete next[key];
+			changed = true;
+		}
+	};
+
+	if (model.omitMaxOutputTokens) {
+		remove("max_output_tokens");
+		remove("max_tokens");
+		remove("max_completion_tokens");
+	}
+	if (model.supportsTools === false) {
+		remove("tools");
+		remove("tool_choice");
+		remove("parallel_tool_calls");
+	}
+	return changed ? next : payload;
+}
+
 export async function checkHealth(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {
 	try {
 		const res = await fetch(`${config.serverUrl}/api/health/ping`, {
@@ -174,14 +196,14 @@ function rawModalities(value: unknown): string[] {
 
 function normalizeInputModalities(model: OmniApiModel): string[] {
 	const raw = rawModalities(model.input_modalities ?? model.input);
-	const input: string[] = [];
-	if (raw.includes("text") || raw.length === 0) input.push("text");
+	const capabilities = model.capabilities;
 	const visual =
 		raw.some((item) => VISUAL_MODALITIES.has(item)) ||
-		model.capabilities?.vision === true ||
-		model.capabilities?.attachment === true;
-	if (visual && !input.includes("image")) input.push("image");
-	return input;
+		capabilities?.vision === true ||
+		capabilities?.attachment === true ||
+		capabilities?.pdf === true ||
+		capabilities?.video === true;
+	return visual ? ["text", "image"] : ["text"];
 }
 
 function isPiChatModel(model: OmniApiModel): boolean {
@@ -193,11 +215,31 @@ function isPiChatModel(model: OmniApiModel): boolean {
 }
 
 function mapThinking(model: OmniApiModel): OmniThinking | undefined {
-	const raw = model.effort_tiers ?? model.capabilities?.effort_tiers;
-	if (!Array.isArray(raw)) return undefined;
-	const efforts = raw.map((item) => String(item).trim().toLowerCase()).filter((item) => OMP_EFFORTS.has(item));
+	const raw = Array.isArray(model.effort_tiers)
+		? model.effort_tiers
+		: Array.isArray(model.capabilities?.effort_tiers)
+			? model.capabilities.effort_tiers
+			: undefined;
+	if (!raw) return undefined;
+	const efforts = Array.from(
+		new Set(
+			raw
+				.filter((item): item is string => typeof item === "string")
+				.map((item) => item.trim().toLowerCase())
+				.filter((item) => OMP_EFFORTS.has(item)),
+		),
+	);
 	if (efforts.length === 0) return undefined;
 	return { mode: "effort", efforts };
+}
+
+function thinkingLevelMap(thinking: OmniThinking | undefined): ProviderThinkingLevelMap | undefined {
+	if (!thinking) return undefined;
+	const supported = new Set(thinking.efforts);
+	return {
+		off: "none",
+		...Object.fromEntries(THINKING_LEVELS.map((level) => [level, supported.has(level) ? level : null])),
+	} as ProviderThinkingLevelMap;
 }
 
 function positiveNumber(value: unknown): number | undefined {
@@ -223,6 +265,7 @@ function upsertSyncedModel(models: SyncedModel[], next: SyncedModel): void {
 		reasoning: existing.reasoning || next.reasoning,
 		supportsTools: next.supportsTools ?? existing.supportsTools,
 		thinking: next.thinking ?? existing.thinking,
+		thinkingLevelMap: next.thinkingLevelMap ?? existing.thinkingLevelMap,
 	};
 }
 
@@ -320,6 +363,7 @@ async function fetchSyncedModels(config: OmniConfig, signal?: AbortSignal): Prom
 		const contextWindow = positiveNumber(model.context_length) ?? positiveNumber(model.max_input_tokens);
 		const maxTokens = positiveNumber(model.max_output_tokens) ?? positiveNumber(model.max_tokens);
 		const toolCalling = model.capabilities?.tool_calling;
+		const thinking = mapThinking(model);
 		const synced: SyncedModel = {
 			id: model.id,
 			name: model.name ?? model.id,
@@ -332,7 +376,8 @@ async function fetchSyncedModels(config: OmniConfig, signal?: AbortSignal): Prom
 					model.capabilities?.thinking ||
 					model.capabilities?.supportsThinking,
 			),
-			thinking: mapThinking(model),
+			thinking,
+			thinkingLevelMap: thinkingLevelMap(thinking),
 			omitMaxOutputTokens: !maxTokens,
 		};
 		if (contextWindow) synced.contextWindow = contextWindow;
@@ -362,11 +407,14 @@ function buildModel(model: SyncedModel, pricing?: ModelPricing): ProviderModelCo
 		cost: modelCost(pricing),
 		contextWindow,
 		maxTokens,
-		compat: PROVIDER_COMPAT,
+		compat: modelCompat(model.omitMaxOutputTokens),
 	};
 	if (model.omitMaxOutputTokens) config.omitMaxOutputTokens = true;
 	if (model.supportsTools !== undefined) config.supportsTools = model.supportsTools;
-	if (model.thinking) config.thinking = model.thinking;
+	if (model.thinking) {
+		config.thinking = model.thinking;
+		if (providerApi() === DEFAULT_PROVIDER_API) config.thinkingLevelMap = model.thinkingLevelMap ?? thinkingLevelMap(model.thinking);
+	}
 	return config;
 }
 
@@ -426,13 +474,18 @@ function persistModels(agentHome: string, config: OmniConfig, models: ProviderMo
 	const path = modelsJsonPath(agentHome);
 	const file = readModelsJson(agentHome);
 	file.providers ??= {};
+	const persistedModels = models.map((model) => {
+		if (!model.omitMaxOutputTokens) return model;
+		const { maxTokens: _maxTokens, ...withoutMaxTokens } = model;
+		return withoutMaxTokens as ProviderModelConfig;
+	});
 	file.providers[config.providerName] = {
 		baseUrl: `${config.serverUrl}/v1`,
 		api: providerApi(),
 		auth: "none",
 		authHeader: true,
 		compat: PROVIDER_COMPAT,
-		models,
+		models: persistedModels,
 	};
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, JSON.stringify(file, null, 2));
@@ -455,20 +508,27 @@ export async function registerOmniProvider(
 export function normalizePersistedModels(models: Array<Partial<ProviderModelConfig>>): ProviderModelConfig[] {
 	return models.filter((model): model is Partial<ProviderModelConfig> & Pick<ProviderModelConfig, "id"> => Boolean(model.id)).map((model) => {
 		const contextWindow = model.contextWindow ?? 128_000;
+		const hasOutputLimit = typeof model.maxTokens === "number" && Number.isFinite(model.maxTokens) && model.maxTokens > 0;
+		const omitMaxOutputTokens = model.omitMaxOutputTokens ?? !hasOutputLimit;
 		const next: ProviderModelConfig = {
 			id: model.id,
 			name: model.name ?? model.id,
-			api: model.api ?? providerApi(),
+			api: providerApi(),
 			reasoning: model.reasoning ?? false,
 			input: model.input ?? ["text"],
 			cost: { ...ZERO_COST, ...model.cost, tiers: model.cost?.tiers ?? [] },
 			contextWindow,
 			maxTokens: model.maxTokens ?? contextWindow,
-			compat: { ...PROVIDER_COMPAT, ...model.compat },
+			compat: { ...modelCompat(omitMaxOutputTokens), ...model.compat },
 		};
-		if (model.omitMaxOutputTokens) next.omitMaxOutputTokens = true;
+		if (omitMaxOutputTokens) next.omitMaxOutputTokens = true;
 		if (model.supportsTools !== undefined) next.supportsTools = model.supportsTools;
-		if (model.thinking) next.thinking = model.thinking;
+		if (model.thinking) {
+			next.thinking = model.thinking;
+			if (providerApi() === DEFAULT_PROVIDER_API) next.thinkingLevelMap = model.thinkingLevelMap ?? thinkingLevelMap(model.thinking);
+		} else if (model.thinkingLevelMap) {
+			next.thinkingLevelMap = model.thinkingLevelMap;
+		}
 		return next;
 	});
 }

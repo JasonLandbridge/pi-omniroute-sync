@@ -4,7 +4,7 @@ import { AUTO_MODELS } from "./provider.ts";
 
 export type KeyMatcher = (data: string, key: string) => boolean;
 export type ConfigDialogTab = "summary" | "config";
-type EditingField = "serverUrl" | "includeModels" | "excludeModels" | "modelCacheTtlMinutes" | "apiKey";
+type EditingField = "serverUrl" | "includeModels" | "excludeModels" | "modelCacheTtlMinutes" | "autoSyncIntervalSeconds" | "apiKey";
 
 export interface ModelSummary {
 	total: number;
@@ -168,6 +168,13 @@ export class ConfigDialog implements OmniComponent {
 				return;
 			}
 			this.draft.modelCacheTtlMinutes = ttl;
+		} else if (this.editing === "autoSyncIntervalSeconds") {
+			const interval = Number(value.trim());
+			if (!value.trim() || !Number.isFinite(interval) || interval < 0) {
+				this.status = "Auto-sync interval must be a non-negative number of seconds.";
+				return;
+			}
+			this.draft.autoSyncIntervalSeconds = Math.floor(interval);
 		} else {
 			this.draft[this.editing as "serverUrl" | "apiKey"] = value;
 		}
@@ -189,7 +196,7 @@ export class ConfigDialog implements OmniComponent {
 	}
 
 	private move(delta: number): void {
-		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 10) - 1, this.selected + delta));
+		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 11) - 1, this.selected + delta));
 		this.status = this.rowDescription();
 	}
 
@@ -200,8 +207,9 @@ export class ConfigDialog implements OmniComponent {
 		if (this.selected === 4) return this.startEditing("includeModels", this.draft.includeModels.join(", "));
 		if (this.selected === 5) return this.startEditing("excludeModels", this.draft.excludeModels.join(", "));
 		if (this.selected === 7) return this.startEditing("modelCacheTtlMinutes", String(this.draft.modelCacheTtlMinutes));
-		if (this.selected === 8) return this.startEditing("apiKey", "");
-		if (this.selected === 9) {
+		if (this.selected === 8) return this.startEditing("autoSyncIntervalSeconds", String(this.draft.autoSyncIntervalSeconds));
+		if (this.selected === 9) return this.startEditing("apiKey", "");
+		if (this.selected === 10) {
 			this.draft.apiKey = "";
 			this.status = "API key cleared in draft. Escape saves and closes.";
 		}
@@ -284,10 +292,11 @@ export class ConfigDialog implements OmniComponent {
 			this.theme.bold("Startup sync"),
 			this.row(6, "Sync stale models on startup", this.draft.syncOnStartup ? "on" : "off", true),
 			this.row(7, "Model cache TTL", `${this.draft.modelCacheTtlMinutes} minutes`),
+			this.row(8, "Auto-sync interval", this.draft.autoSyncIntervalSeconds === 0 ? "off" : `${this.draft.autoSyncIntervalSeconds} seconds`),
 			"",
 			this.theme.bold("Credentials"),
-			this.row(8, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
-			this.row(9, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
+			this.row(9, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
+			this.row(10, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
 		];
 	}
 
@@ -314,6 +323,7 @@ export class ConfigDialog implements OmniComponent {
 			"Comma-separated globs applied after include filters.",
 			"Sync once on startup when the cache is stale.",
 			"Minutes before startup considers the model cache stale; zero means always.",
+			"Seconds between background catalog refreshes; zero disables autosync.",
 			"Replace the API key in a masked inline editor.",
 			"Clear the API key in the draft.",
 		][this.selected] ?? "";

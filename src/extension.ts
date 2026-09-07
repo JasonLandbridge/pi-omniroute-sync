@@ -6,14 +6,14 @@ import {
 	resolveAgentHome,
 	sanitizeConfig,
 	saveConfig,
+	saveSettings,
 	settingsPath,
 	type OmniConfig,
 	type OmniSettings,
 } from "./config.ts";
 import { ConfigDialog, summarizeModels, type ModelSummary } from "./config-dialog.ts";
 import type { AgentHomeOptions, OmniContext, OmniPI, ProviderModelConfig } from "./contracts.ts";
-import { sanitizeAutoSyncIntervalMs } from "./config.ts";
-import { AUTO_MODELS, checkHealth, checkModelsEndpoint, discoverModels, isSyncStale, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat } from "./provider.ts";
+import { AUTO_MODELS, checkHealth, checkModelsEndpoint, discoverModels, isSyncStale, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
 
 function sortKey(id: string): string {
 	const autoIndex = AUTO_MODELS.indexOf(id);
@@ -76,7 +76,7 @@ function helpText(): string {
 		"/omni test <model>     Smoke-test the configured OmniRoute inference API",
 		"/omni dashboard        Show OmniRoute dashboard URL",
 		"/omni config           Show config paths and current settings",
-		"/omni autosync [ms|off|on|status]  Background catalog refresh while running",
+		"/omni autosync [status|on|off|<seconds>]  Background catalog refresh while running",
 		"/omni help             Show this help",
 	].join("\n");
 }
@@ -98,6 +98,7 @@ async function showConfigDialog(
 				`Provider: ${config.providerName}`,
 				`Only usable models: ${settings.onlyShowUsableModels ? "yes" : "no"}`,
 				`Global routing models: ${settings.showGlobalRoutingModels ? "shown" : "hidden"}`,
+				`Auto-sync interval: ${settings.autoSyncIntervalSeconds === 0 ? "off" : `${settings.autoSyncIntervalSeconds} seconds`}`,
 				`API key: ${config.apiKey ? "configured" : "not configured"}`,
 			].join("\n"),
 			"info",
@@ -156,6 +157,7 @@ async function showConfigDialog(
 }
 
 async function runSetup(ctx: OmniContext, pi: OmniPI, agentHome: string): Promise<OmniConfig | undefined> {
+	const storedSettings = loadSettings(agentHome);
 	const current = loadConfig(agentHome);
 	const serverUrl = await ctx.ui.input("OmniRoute server URL", current.serverUrl);
 	if (serverUrl === undefined) return undefined;
@@ -165,14 +167,15 @@ async function runSetup(ctx: OmniContext, pi: OmniPI, agentHome: string): Promis
 	);
 	if (apiKey === undefined) return undefined;
 
-	const next = sanitizeConfig({ ...current, serverUrl, apiKey: apiKey || current.apiKey });
-	if (!(await checkModelsEndpoint(next, ctx.signal))) {
+	const next = sanitizeConfig({ ...current, serverUrl, apiKey: apiKey || storedSettings.apiKey });
+	const runtimeConfig = { ...next, apiKey: process.env.OMNIROUTE_API_KEY ?? next.apiKey };
+	if (!(await checkModelsEndpoint(runtimeConfig, ctx.signal))) {
 		ctx.ui.notify(`Cannot reach ${next.serverUrl}/v1/models.`, "error");
 		return undefined;
 	}
 
-	saveConfig(agentHome, next);
-	const models = await registerOmniProvider(pi, agentHome, next, loadSettings(agentHome), ctx.signal);
+	saveConfig(agentHome, next, storedSettings);
+	const models = await registerOmniProvider(pi, agentHome, runtimeConfig, loadSettings(agentHome), ctx.signal);
 	ctx.ui.notify(`Saved. Synced ${models.length} model(s).`, "info");
 	return next;
 }
@@ -215,13 +218,13 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	function startAutoSync(ctx: OmniContext): void {
 		stopAutoSync();
 		sessionCtx = ctx;
-		const interval = sanitizeAutoSyncIntervalMs(loadSettings(agentHome).autoSyncIntervalMs);
-		if (interval === 0) return;
+		const intervalSeconds = loadSettings(agentHome).autoSyncIntervalSeconds;
+		if (intervalSeconds === 0) return;
 		autoSyncTimer = setInterval(() => {
-			void sync(sessionCtx, { quiet: true }).catch((error) => {
+			void sync(undefined, { quiet: true }).catch((error) => {
 				sessionCtx?.ui.notify(`OmniRoute auto-sync failed: ${(error as Error).message}`, "warning");
 			});
-		}, interval);
+		}, intervalSeconds * 1000);
 	}
 
 	reloadOmniProvider(pi, agentHome, config);
@@ -230,20 +233,22 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		sessionCtx = ctx;
 		config = loadConfig(agentHome);
 		const settings = loadSettings(agentHome);
-		const interval = sanitizeAutoSyncIntervalMs(settings.autoSyncIntervalMs);
-		if (settings.syncOnStartup && isConfigured(agentHome) && (interval > 0 || isSyncStale(settings))) {
+		if (settings.syncOnStartup && isConfigured(agentHome) && isSyncStale(settings)) {
 			try {
 				lastSyncCount = (await registerOmniProvider(pi, agentHome, config, settings, ctx.signal)).length;
 			} catch (error) {
 				if (ctx.hasUI) ctx.ui.notify(`OmniRoute startup sync failed; using previous models: ${(error as Error).message}`, "warning");
 			}
 		}
-		if (!ctx.hasUI) return;
 		if (!isConfigured(agentHome) && !process.env.OMNIROUTE_URL) {
-			ctx.ui.setStatus("omni", "OmniRoute unconfigured");
-			ctx.ui.notify("OmniRoute loaded. Run /omni setup to connect.", "warning");
+			if (ctx.hasUI) {
+				ctx.ui.setStatus("omni", "OmniRoute unconfigured");
+				ctx.ui.notify("OmniRoute loaded. Run /omni setup to connect.", "warning");
+			}
 			return;
 		}
+		startAutoSync(ctx);
+		if (!ctx.hasUI) return;
 		const ok = await checkHealth(config);
 		ctx.ui.setStatus("omni", ok ? undefined : "OmniRoute unreachable");
 		if (!ok) ctx.ui.notify(`OmniRoute unreachable at ${config.serverUrl}. Run /omni sync after reconnecting.`, "warning");
@@ -251,8 +256,11 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		healthTimer = setInterval(async () => {
 			ctx.ui.setStatus("omni", (await checkHealth(loadConfig(agentHome))) ? undefined : "OmniRoute unreachable");
 		}, 60_000);
-		startAutoSync(ctx);
 	});
+
+	pi.on("before_provider_request", (event, ctx) =>
+		transformProviderPayload(event.payload, ctx.model, config.providerName),
+	);
 
 	pi.on("session_shutdown", () => {
 		if (healthTimer) clearInterval(healthTimer);
@@ -319,7 +327,10 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 				if (sub === "help") return ctx.ui.notify(helpText(), "info");
 				if (sub === "setup") {
 					const next = await runSetup(ctx, pi, agentHome);
-					if (next) config = next;
+					if (next) {
+						config = next;
+						startAutoSync(ctx);
+					}
 					return;
 				}
 				if (sub === "sync") return void (await sync(ctx));
@@ -341,34 +352,32 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 				if (sub === "dashboard" || sub === "dash") {
 					return ctx.ui.notify(`OmniRoute dashboard: ${config.serverUrl}`, "info");
 				}
-				if (sub === "config") return showConfigDialog(ctx, pi, agentHome, options);
+				if (sub === "config") {
+					await showConfigDialog(ctx, pi, agentHome, options);
+					startAutoSync(ctx);
+					return;
+				}
 				if (sub === "autosync") {
 					const arg = (rest[0] || "status").toLowerCase();
 					const settings = loadSettings(agentHome);
 					if (arg === "status" || arg === "") {
-						const interval = sanitizeAutoSyncIntervalMs(settings.autoSyncIntervalMs);
+						const intervalSeconds = settings.autoSyncIntervalSeconds;
 						return ctx.ui.notify(
-							`Auto-sync: ${interval === 0 ? "off" : `every ${Math.round(interval / 1000)}s`}\nActive: ${autoSyncTimer ? "yes" : "no (starts with session)"}`,
+							`Auto-sync: ${intervalSeconds === 0 ? "off" : `every ${intervalSeconds}s`}\nActive: ${autoSyncTimer ? "yes" : "no (starts with session)"}`,
 							"info",
 						);
 					}
-					let ms: number | undefined;
-					if (arg === "off" || arg === "disable" || arg === "0") ms = 0;
-					else if (arg === "on" || arg === "enable" || arg === "default") ms = 300_000;
+					let seconds: number | undefined;
+					if (arg === "off" || arg === "disable" || arg === "0") seconds = 0;
+					else if (arg === "on" || arg === "enable" || arg === "default") seconds = 300;
 					else if (/^\d+$/.test(arg)) {
-						ms = Number(arg);
-						if (ms > 0 && ms < 1000) ms *= 1000;
-					} else {
-						const match = arg.match(/^(\d+)(ms|s|m|h)$/);
-						if (match) {
-							const n = Number(match[1]);
-							ms = match[2] === "ms" ? n : match[2] === "s" ? n * 1000 : match[2] === "m" ? n * 60_000 : n * 3_600_000;
-						}
+						const value = Number(arg);
+						if (Number.isSafeInteger(value)) seconds = value;
 					}
-					if (ms === undefined) return ctx.ui.notify("Usage: /omni autosync [status|on|off|<ms>|<Ns|Nm|Nh>]", "warning");
-					saveConfig(agentHome, loadConfig(agentHome), { ...settings, autoSyncIntervalMs: ms });
+					if (seconds === undefined) return ctx.ui.notify("Usage: /omni autosync [status|on|off|<seconds>]", "warning");
+					saveSettings(agentHome, { ...settings, autoSyncIntervalSeconds: Math.floor(seconds) });
 					startAutoSync(ctx);
-					return ctx.ui.notify(`OmniRoute auto-sync ${ms === 0 ? "disabled" : `set to every ${Math.round(sanitizeAutoSyncIntervalMs(ms) / 1000)}s`}.`, "info");
+					return ctx.ui.notify(`OmniRoute auto-sync ${seconds === 0 ? "disabled" : `set to every ${seconds}s`}.`, "info");
 				}
 				ctx.ui.notify(`Unknown /omni command '${sub}'.\n\n${helpText()}`, "warning");
 			} catch (error) {
