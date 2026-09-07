@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
+import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, probeHealth, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
 
 const fetchStub = vi.spyOn(globalThis, "fetch");
 
@@ -21,6 +21,15 @@ it("checks OmniRoute's lightweight health endpoint", async () => {
 		"http://localhost:20128/api/health/ping",
 		expect.objectContaining({ headers: { Authorization: "Bearer secret" } }),
 	);
+});
+
+it("treats reachable non-success health responses as unhealthy, not unreachable", async () => {
+	fetchStub.mockResolvedValue(new Response(null, { status: 401 }));
+
+	expect(await probeHealth({ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" })).toEqual({
+		ok: false,
+		unreachable: false,
+	});
 });
 
 it("normalizes legacy persisted models for Responses and cost tiers", () => {
@@ -102,7 +111,7 @@ it("persists a keyless OMP marker without leaking the API key", async () => {
 		{ registerProvider } as never,
 		agentHome,
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 
 	const persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
@@ -225,7 +234,7 @@ it("maps vision capabilities, limits, and pricing from the catalog", async () =>
 	const { discoverModels } = await import("../src/provider.ts");
 	const models = await discoverModels(
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 	const vision = models.find((model) => model.id === "openai/gpt-vision");
 	expect(vision?.input).toEqual(["text", "image"]);
@@ -257,7 +266,7 @@ it("normalizes every visual capability into text and image inputs", async () => 
 	const { discoverModels } = await import("../src/provider.ts");
 	const models = await discoverModels(
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 
 	for (const id of ["image-only", "attachment-capability", "pdf-capability", "video-capability"]) {
@@ -277,7 +286,7 @@ it("keeps advertised models when usable-provider verification fails", async () =
 	const { discoverModels } = await import("../src/provider.ts");
 	const models = await discoverModels(
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: true, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: true, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 	const model = models.find((entry) => entry.id === "openai/gpt-5");
 	expect(model).toBeDefined();

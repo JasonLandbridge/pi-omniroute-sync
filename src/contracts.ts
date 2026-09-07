@@ -38,6 +38,7 @@ export interface OmniUI {
 
 export interface OmniRequestModel {
 	provider?: string;
+	id?: string;
 	omitMaxOutputTokens?: boolean;
 	supportsTools?: boolean;
 }
@@ -59,12 +60,29 @@ export interface AgentSettledEvent {
 	type: "agent_settled";
 }
 
+export interface AgentEndMessage {
+	role?: string;
+	provider?: string;
+	stopReason?: string;
+	errorMessage?: string;
+}
+
+export interface AgentEndEvent {
+	type: "agent_end";
+	messages: AgentEndMessage[];
+}
+
+export interface OmniModelRegistry {
+	find(provider: string, id: string): unknown;
+}
+
 export interface OmniContext {
 	hasUI: boolean;
 	mode: "tui" | "rpc" | "json" | "print";
 	model?: OmniRequestModel;
 	signal?: AbortSignal;
 	ui: OmniUI;
+	modelRegistry?: OmniModelRegistry;
 }
 
 export type ProviderApi = "openai-completions" | "openai-responses";
@@ -145,14 +163,18 @@ export interface OmniPI {
 	): void;
 	on(event: "session_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "agent_start", handler: (event: AgentStartEvent, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "turn_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "agent_end", handler: (event: AgentEndEvent, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "after_provider_response", handler: (event: ProviderResponseEvent, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "agent_settled", handler: (event: AgentSettledEvent, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "before_provider_request", handler: (event: ProviderRequestEvent, ctx: OmniContext) => unknown | Promise<unknown>): void;
 	on(event: "session_shutdown", handler: () => void): void;
 	on(
 		event: "model_select",
-		handler: (event: { model?: { id?: string } }, ctx: OmniContext) => void | Promise<void>,
+		handler: (event: { model?: { id?: string; provider?: string } }, ctx: OmniContext) => void | Promise<void>,
 	): void;
+	on(event: "before_agent_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
+	setModel?(model: unknown): Promise<boolean> | boolean;
 }
 
 export interface AgentHomeOptions {

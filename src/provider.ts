@@ -163,17 +163,26 @@ export function transformProviderPayload(payload: unknown, model: OmniRequestMod
 	return changed ? next : payload;
 }
 
-export async function checkHealth(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {
+export interface HealthProbeResult {
+	ok: boolean;
+	unreachable: boolean;
+}
+
+export async function probeHealth(config: OmniConfig, signal?: AbortSignal): Promise<HealthProbeResult> {
 	try {
 		const res = await fetch(`${config.serverUrl}/api/health/ping`, {
 			headers: authHeaders(config),
 			signal: requestSignal(3_000, signal),
 		});
-		return res.ok;
+		return { ok: res.ok, unreachable: res.status === 408 || res.status >= 500 };
 	} catch (error) {
 		if (signal?.aborted) throw error;
-		return false;
+		return { ok: false, unreachable: true };
 	}
+}
+
+export async function checkHealth(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {
+	return (await probeHealth(config, signal)).ok;
 }
 
 export async function checkModelsEndpoint(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {

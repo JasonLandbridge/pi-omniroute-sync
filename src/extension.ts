@@ -1,6 +1,8 @@
 import {
 	isConfigured,
 	loadConfig,
+	loadHopSettings,
+	loadProbeConfig,
 	loadSettings,
 	modelsJsonPath,
 	resolveAgentHome,
@@ -13,8 +15,16 @@ import {
 } from "./config.ts";
 import { ConfigDialog, summarizeModels, type ModelSummary } from "./config-dialog.ts";
 import type { AgentHomeOptions, OmniContext, OmniPI, ProviderModelConfig } from "./contracts.ts";
-import { AUTO_MODELS, checkHealth, checkModelsEndpoint, discoverModels, isSyncStale, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
+import { AUTO_MODELS, checkModelsEndpoint, discoverModels, isSyncStale, probeHealth, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
 import { registerGatewayTelemetry } from "./gateway-telemetry.ts";
+import {
+	createUnreachableController,
+	hopOnUnreachable,
+	hopOptionsFromContext,
+	isOmniActiveModel,
+	isUnreachableHttpStatus,
+	isUnreachableRequestFailure,
+} from "./unreachable.ts";
 
 function sortKey(id: string): string {
 	const autoIndex = AUTO_MODELS.indexOf(id);
@@ -52,17 +62,20 @@ function modelLines(models: ProviderModelConfig[], query = "", limit = 80): stri
 }
 
 async function showStatus(ctx: OmniContext, agentHome: string, config: OmniConfig): Promise<void> {
-	const ok = await checkHealth(config, ctx.signal);
+	const probeConfig = loadProbeConfig(agentHome);
+	const hop = loadHopSettings(agentHome);
+	const result = await probeHealth(probeConfig, ctx.signal);
 	ctx.ui.notify(
 		[
 			"OmniRoute Status",
 			"",
-			`Server:     ${config.serverUrl}`,
+			`Server:     ${probeConfig.serverUrl}`,
 			`Provider:   ${config.providerName}`,
-			`Health:     ${ok ? "reachable" : "unreachable"}`,
+			`Health:     ${result.ok ? "reachable" : result.unreachable ? "unreachable" : "health check failed"}`,
 			`Configured: ${isConfigured(agentHome) ? "yes" : "no — run /omni setup"}`,
+			`On unreachable: ${hop.onUnreachable}${hop.fallbackModel ? ` → ${hop.fallbackModel}` : ""}`,
 		].join("\n"),
-		ok ? "info" : "warning",
+		result.ok ? "info" : "warning",
 	);
 }
 
@@ -90,7 +103,8 @@ async function showConfigDialog(
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
 		const config = loadConfig(agentHome);
-		const settings = loadSettings(agentHome);
+		const storedSettings = loadSettings(agentHome);
+		const settings = { ...storedSettings, ...loadHopSettings(agentHome) };
 		ctx.ui.notify(
 			[
 				`Settings: ${settingsPath(agentHome)}`,
@@ -100,6 +114,7 @@ async function showConfigDialog(
 				`Only usable models: ${settings.onlyShowUsableModels ? "yes" : "no"}`,
 				`Global routing models: ${settings.showGlobalRoutingModels ? "shown" : "hidden"}`,
 				`Auto-sync interval: ${settings.autoSyncIntervalSeconds === 0 ? "off" : `${settings.autoSyncIntervalSeconds} seconds`}`,
+				`On unreachable: ${settings.onUnreachable}${settings.fallbackModel ? ` → ${settings.fallbackModel}` : ""}`,
 				`Gateway tok/s: ${settings.showGatewayTokensPerSecond ? "shown" : "hidden"}`,
 				`API key: ${config.apiKey ? "configured" : "not configured"}`,
 			].join("\n"),
@@ -122,7 +137,8 @@ async function showConfigDialog(
 	};
 	await refreshSummary();
 
-	const settings = loadSettings(agentHome);
+	const storedSettings = loadSettings(agentHome);
+	const settings: OmniSettings = { ...storedSettings, ...loadHopSettings(agentHome) };
 	const saved = await ctx.ui.custom<OmniSettings | undefined>((tui, theme, _keybindings, done) => {
 		const sync = async () => {
 			try {
@@ -149,9 +165,13 @@ async function showConfigDialog(
 	});
 	if (!saved) return;
 
-	saveConfig(agentHome, saved, saved);
+	const persisted: OmniSettings = { ...saved };
+	const envAction = process.env.OMNIROUTE_ON_UNREACHABLE;
+	if (envAction === "none" || envAction === "host-fallback") persisted.onUnreachable = storedSettings.onUnreachable;
+	if (process.env.OMNIROUTE_FALLBACK_MODEL !== undefined) persisted.fallbackModel = storedSettings.fallbackModel;
+	saveConfig(agentHome, persisted, storedSettings);
 	try {
-		const models = await registerOmniProvider(pi, agentHome, loadConfig(agentHome), saved, ctx.signal);
+		const models = await registerOmniProvider(pi, agentHome, loadConfig(agentHome), persisted, ctx.signal);
 		ctx.ui.notify(`Settings saved; OmniRoute synced ${models.length} model(s).`, "info");
 	} catch (error) {
 		ctx.ui.notify(`Settings saved, but sync failed: ${(error as Error).message}`, "error");
@@ -187,10 +207,49 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	const agentHome = resolveAgentHome(options);
 	let config = loadConfig(agentHome);
 	let healthTimer: ReturnType<typeof setInterval> | undefined;
+	let healthProbeAbortController: AbortController | undefined;
 	let autoSyncTimer: ReturnType<typeof setInterval> | undefined;
 	let sessionCtx: OmniContext | undefined;
 	let syncInFlight: Promise<number> | null = null;
 	let lastSyncCount = 0;
+	const unreachable = createUnreachableController();
+	let hopping = false;
+	let skipNextTurnProbe = false;
+	// Defer response-triggered hops until host retries have settled; the preflight probe still hops before the request.
+	let pendingRequestFailure = false;
+
+	async function maybeHop(ctx: OmniContext): Promise<void> {
+		const hop = loadHopSettings(agentHome);
+		const probeConfig = loadProbeConfig(agentHome);
+		if (hop.onUnreachable !== "host-fallback") return;
+		if (!isOmniActiveModel(ctx.model, probeConfig.providerName)) return;
+		if (hopping) return;
+		hopping = true;
+		try {
+			await hopOnUnreachable(
+				{ serverUrl: probeConfig.serverUrl },
+				hopOptionsFromContext(ctx, { ...hop, omniProviderName: probeConfig.providerName }, pi.setModel?.bind(pi)),
+			);
+		} finally {
+			hopping = false;
+		}
+	}
+
+	function healthStatus(result: { ok: boolean; unreachable: boolean }): string | undefined {
+		if (result.ok) return undefined;
+		return result.unreachable ? "OmniRoute unreachable" : "OmniRoute health check failed";
+	}
+
+	async function probeBeforeTurn(ctx: OmniContext): Promise<void> {
+		const hop = loadHopSettings(agentHome);
+		if (hop.onUnreachable !== "host-fallback") return;
+		const probeConfig = loadProbeConfig(agentHome);
+		if (!isOmniActiveModel(ctx.model, probeConfig.providerName)) return;
+		const result = await unreachable.probe(probeConfig, ctx.signal, true);
+		if (result.ok || !result.unreachable) return;
+		if (ctx.hasUI) ctx.ui.setStatus("omni", "OmniRoute unreachable");
+		await maybeHop(ctx);
+	}
 
 	async function sync(ctx?: OmniContext, options?: { quiet?: boolean }): Promise<number> {
 		if (syncInFlight) return syncInFlight;
@@ -256,12 +315,21 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		}
 		startAutoSync(ctx);
 		if (!ctx.hasUI) return;
-		const ok = await checkHealth(config);
-		ctx.ui.setStatus("omni", ok ? undefined : "OmniRoute unreachable");
-		if (!ok) ctx.ui.notify(`OmniRoute unreachable at ${config.serverUrl}. Run /omni sync after reconnecting.`, "warning");
+		const probeConfig = loadProbeConfig(agentHome);
+		healthProbeAbortController?.abort();
+		healthProbeAbortController = new AbortController();
+		const result = await unreachable.probe(probeConfig, ctx.signal ?? healthProbeAbortController.signal);
+		ctx.ui.setStatus("omni", healthStatus(result));
+		if (!result.ok) {
+			const message = result.unreachable
+				? `OmniRoute unreachable at ${probeConfig.serverUrl}. Run /omni sync after reconnecting.`
+				: `OmniRoute health check failed at ${probeConfig.serverUrl}.`;
+			ctx.ui.notify(message, "warning");
+		}
 		if (healthTimer) clearInterval(healthTimer);
 		healthTimer = setInterval(async () => {
-			ctx.ui.setStatus("omni", (await checkHealth(loadConfig(agentHome))) ? undefined : "OmniRoute unreachable");
+			const next = await unreachable.probe(loadProbeConfig(agentHome), healthProbeAbortController?.signal).catch(() => undefined);
+			if (next) ctx.ui.setStatus("omni", healthStatus(next));
 		}, 60_000);
 	});
 
@@ -272,8 +340,63 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	pi.on("session_shutdown", () => {
 		if (healthTimer) clearInterval(healthTimer);
 		healthTimer = undefined;
+		healthProbeAbortController?.abort();
+		healthProbeAbortController = undefined;
 		stopAutoSync();
 		sessionCtx = undefined;
+		pendingRequestFailure = false;
+		skipNextTurnProbe = false;
+	});
+
+	pi.on("before_agent_start", async (_event, ctx) => {
+		skipNextTurnProbe = true;
+		await probeBeforeTurn(ctx);
+	});
+
+	pi.on("turn_start", async (_event, ctx) => {
+		if (skipNextTurnProbe) {
+			skipNextTurnProbe = false;
+			return;
+		}
+		await probeBeforeTurn(ctx);
+	});
+
+	pi.on("after_provider_response", async (event, ctx) => {
+		const probeConfig = loadProbeConfig(agentHome);
+		if (ctx.model?.provider !== probeConfig.providerName) return;
+		if (isUnreachableHttpStatus(event.status)) {
+			pendingRequestFailure = true;
+			unreachable.reset();
+			if (ctx.hasUI) ctx.ui.setStatus("omni", "OmniRoute unreachable");
+			return;
+		}
+		pendingRequestFailure = false;
+	});
+
+	pi.on("agent_end", (event, ctx) => {
+		if (ctx.signal?.aborted) {
+			pendingRequestFailure = false;
+			return;
+		}
+		const probeConfig = loadProbeConfig(agentHome);
+		const lastAssistant = [...event.messages].reverse().find((message) => message.role === "assistant");
+		if (isUnreachableRequestFailure(lastAssistant, probeConfig.providerName)) {
+			pendingRequestFailure = true;
+			return;
+		}
+		if (lastAssistant?.role === "assistant" && lastAssistant.stopReason !== "error" && lastAssistant.stopReason !== "aborted") {
+			pendingRequestFailure = false;
+		}
+	});
+
+	pi.on("agent_settled", async (_event, ctx) => {
+		if (!pendingRequestFailure) return;
+		pendingRequestFailure = false;
+		const probeConfig = loadProbeConfig(agentHome);
+		if (ctx.model?.provider !== probeConfig.providerName) return;
+		if (ctx.hasUI) ctx.ui.setStatus("omni", "OmniRoute unreachable");
+		unreachable.reset();
+		await maybeHop(ctx);
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -286,17 +409,26 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		description: "Return OmniRoute health and provider registration status.",
 		parameters: { type: "object", properties: {} },
 		async execute(_id, _params, signal) {
-			const current = loadConfig(agentHome);
-			const ok = await checkHealth(current, signal);
+			const current = loadProbeConfig(agentHome);
+			const hop = loadHopSettings(agentHome);
+			const result = await unreachable.probe(current, signal);
 			const configured = isConfigured(agentHome);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `OmniRoute ${ok ? "reachable" : "unreachable"}; configured: ${configured}; provider: ${current.providerName}.`,
+						text: `OmniRoute ${result.ok ? "reachable" : result.unreachable ? "unreachable" : "health check failed"}; configured: ${configured}; provider: ${current.providerName}.`,
 					},
 				],
-				details: { ok, configured, serverUrl: current.serverUrl, providerName: current.providerName },
+				details: {
+					ok: result.ok,
+					unreachable: result.unreachable,
+					configured,
+					serverUrl: current.serverUrl,
+					providerName: current.providerName,
+					onUnreachable: hop.onUnreachable,
+					fallbackModel: hop.fallbackModel,
+				},
 			};
 		},
 	});

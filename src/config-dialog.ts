@@ -4,7 +4,7 @@ import { AUTO_MODELS } from "./provider.ts";
 
 export type KeyMatcher = (data: string, key: string) => boolean;
 export type ConfigDialogTab = "summary" | "config";
-type EditingField = "serverUrl" | "includeModels" | "excludeModels" | "modelCacheTtlMinutes" | "autoSyncIntervalSeconds" | "apiKey";
+type EditingField = "serverUrl" | "includeModels" | "excludeModels" | "modelCacheTtlMinutes" | "autoSyncIntervalSeconds" | "fallbackModel" | "apiKey";
 
 export interface ModelSummary {
 	total: number;
@@ -115,7 +115,7 @@ export class ConfigDialog implements OmniComponent {
 		if (this.matchesKey(data, "ctrl+c")) return this.done(undefined);
 		if (this.matchesKey(data, "escape")) return this.done({ ...this.draft });
 		if (this.matchesKey(data, "space")) {
-			if (this.tab === "config" && [2, 3, 6, 9].includes(this.selected)) this.toggleSelectedBoolean();
+			if (this.tab === "config" && [2, 3, 6, 9, 11].includes(this.selected)) this.toggleSelectedBoolean();
 			return;
 		}
 		if (this.matchesKey(data, "left") || this.matchesKey(data, "shift+tab") || this.matchesKey(data, "[")) return this.switchTab("summary");
@@ -175,6 +175,8 @@ export class ConfigDialog implements OmniComponent {
 				return;
 			}
 			this.draft.autoSyncIntervalSeconds = Math.floor(interval);
+		} else if (this.editing === "fallbackModel") {
+			this.draft.fallbackModel = value.trim();
 		} else {
 			this.draft[this.editing as "serverUrl" | "apiKey"] = value;
 		}
@@ -196,20 +198,21 @@ export class ConfigDialog implements OmniComponent {
 	}
 
 	private move(delta: number): void {
-		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 12) - 1, this.selected + delta));
+		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 14) - 1, this.selected + delta));
 		this.status = this.rowDescription();
 	}
 
 	private activate(): void {
 		if (this.tab === "summary") return this.sync();
 		if (this.selected === 0) return this.startEditing("serverUrl", this.draft.serverUrl);
-		if ([2, 3, 6, 9].includes(this.selected)) return this.toggleSelectedBoolean();
+		if ([2, 3, 6, 9, 11].includes(this.selected)) return this.toggleSelectedBoolean();
 		if (this.selected === 4) return this.startEditing("includeModels", this.draft.includeModels.join(", "));
 		if (this.selected === 5) return this.startEditing("excludeModels", this.draft.excludeModels.join(", "));
 		if (this.selected === 7) return this.startEditing("modelCacheTtlMinutes", String(this.draft.modelCacheTtlMinutes));
 		if (this.selected === 8) return this.startEditing("autoSyncIntervalSeconds", String(this.draft.autoSyncIntervalSeconds));
-		if (this.selected === 10) return this.startEditing("apiKey", "");
-		if (this.selected === 11) {
+		if (this.selected === 10) return this.startEditing("fallbackModel", this.draft.fallbackModel);
+		if (this.selected === 12) return this.startEditing("apiKey", "");
+		if (this.selected === 13) {
 			this.draft.apiKey = "";
 			this.status = "API key cleared in draft. Escape saves and closes.";
 		}
@@ -237,6 +240,11 @@ export class ConfigDialog implements OmniComponent {
 		if (this.selected === 6) {
 			this.draft.syncOnStartup = !this.draft.syncOnStartup;
 			this.status = `Stale startup sync ${this.draft.syncOnStartup ? "enabled" : "disabled"} in draft. Escape saves and closes.`;
+			return;
+		}
+		if (this.selected === 9) {
+			this.draft.onUnreachable = this.draft.onUnreachable === "host-fallback" ? "none" : "host-fallback";
+			this.status = `Unreachable behavior set to ${this.draft.onUnreachable} in draft. Escape saves and closes.`;
 			return;
 		}
 		this.draft.showGatewayTokensPerSecond = !this.draft.showGatewayTokensPerSecond;
@@ -299,12 +307,16 @@ export class ConfigDialog implements OmniComponent {
 			this.row(7, "Model cache TTL", `${this.draft.modelCacheTtlMinutes} minutes`),
 			this.row(8, "Auto-sync interval", this.draft.autoSyncIntervalSeconds === 0 ? "off" : `${this.draft.autoSyncIntervalSeconds} seconds`),
 			"",
+			this.theme.bold("Unreachable fallback"),
+			this.row(9, "On unreachable", this.draft.onUnreachable),
+			this.row(10, "Fallback model", this.draft.fallbackModel || "notify only"),
+			"",
 			this.theme.bold("Gateway telemetry"),
-			this.row(9, "Show gateway tok/s", this.draft.showGatewayTokensPerSecond ? "on" : "off", true),
+			this.row(11, "Show gateway tok/s", this.draft.showGatewayTokensPerSecond ? "on" : "off", true),
 			"",
 			this.theme.bold("Credentials"),
-			this.row(10, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
-			this.row(11, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
+			this.row(12, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
+			this.row(13, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
 		];
 	}
 
@@ -332,6 +344,8 @@ export class ConfigDialog implements OmniComponent {
 			"Sync once on startup when the cache is stale.",
 			"Minutes before startup considers the model cache stale; zero means always.",
 			"Seconds between background catalog refreshes; zero disables autosync.",
+			"Space or Enter switches between status-only and host-fallback behavior.",
+			"Host provider/id to select when OmniRoute is unreachable; empty means notify only.",
 			"Show or hide gateway-reported tok/s after OmniRoute turns.",
 			"Replace the API key in a masked inline editor.",
 			"Clear the API key in the draft.",
@@ -341,7 +355,7 @@ export class ConfigDialog implements OmniComponent {
 	private footerHelp(): string {
 		if (this.editing) return "type to edit · enter commit field · esc cancel field · ctrl+c cancel all";
 		if (this.tab === "summary") return "←/→ tabs · ↑/↓ move · enter/s sync · esc save & close · ctrl+c cancel";
-		return [2, 3, 6, 9].includes(this.selected)
+		return [2, 3, 6, 9, 11].includes(this.selected)
 			? "↑/↓ move · space/enter toggle draft · esc save & close · ctrl+c cancel"
 			: "↑/↓ move · enter edit · esc save & close · ctrl+c cancel";
 	}
