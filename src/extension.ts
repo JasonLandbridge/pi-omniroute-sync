@@ -23,6 +23,7 @@ import {
 	hopOptionsFromContext,
 	isOmniActiveModel,
 	isUnreachableHttpStatus,
+	isUnreachableRequestFailure,
 } from "./unreachable.ts";
 
 function sortKey(id: string): string {
@@ -102,7 +103,8 @@ async function showConfigDialog(
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
 		const config = loadConfig(agentHome);
-		const settings = loadSettings(agentHome);
+		const storedSettings = loadSettings(agentHome);
+		const settings = { ...storedSettings, ...loadHopSettings(agentHome) };
 		ctx.ui.notify(
 			[
 				`Settings: ${settingsPath(agentHome)}`,
@@ -112,6 +114,7 @@ async function showConfigDialog(
 				`Only usable models: ${settings.onlyShowUsableModels ? "yes" : "no"}`,
 				`Global routing models: ${settings.showGlobalRoutingModels ? "shown" : "hidden"}`,
 				`Auto-sync interval: ${settings.autoSyncIntervalSeconds === 0 ? "off" : `${settings.autoSyncIntervalSeconds} seconds`}`,
+				`On unreachable: ${settings.onUnreachable}${settings.fallbackModel ? ` → ${settings.fallbackModel}` : ""}`,
 				`Gateway tok/s: ${settings.showGatewayTokensPerSecond ? "shown" : "hidden"}`,
 				`API key: ${config.apiKey ? "configured" : "not configured"}`,
 			].join("\n"),
@@ -134,7 +137,8 @@ async function showConfigDialog(
 	};
 	await refreshSummary();
 
-	const settings = loadSettings(agentHome);
+	const storedSettings = loadSettings(agentHome);
+	const settings: OmniSettings = { ...storedSettings, ...loadHopSettings(agentHome) };
 	const saved = await ctx.ui.custom<OmniSettings | undefined>((tui, theme, _keybindings, done) => {
 		const sync = async () => {
 			try {
@@ -161,9 +165,13 @@ async function showConfigDialog(
 	});
 	if (!saved) return;
 
-	saveConfig(agentHome, saved, saved);
+	const persisted: OmniSettings = { ...saved };
+	const envAction = process.env.OMNIROUTE_ON_UNREACHABLE;
+	if (envAction === "none" || envAction === "host-fallback") persisted.onUnreachable = storedSettings.onUnreachable;
+	if (process.env.OMNIROUTE_FALLBACK_MODEL !== undefined) persisted.fallbackModel = storedSettings.fallbackModel;
+	saveConfig(agentHome, persisted, storedSettings);
 	try {
-		const models = await registerOmniProvider(pi, agentHome, loadConfig(agentHome), saved, ctx.signal);
+		const models = await registerOmniProvider(pi, agentHome, loadConfig(agentHome), persisted, ctx.signal);
 		ctx.ui.notify(`Settings saved; OmniRoute synced ${models.length} model(s).`, "info");
 	} catch (error) {
 		ctx.ui.notify(`Settings saved, but sync failed: ${(error as Error).message}`, "error");
@@ -205,6 +213,8 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	let lastSyncCount = 0;
 	const unreachable = createUnreachableController();
 	let hopping = false;
+	// Defer response-triggered hops until host retries have settled; the pre-send probe still hops immediately.
+	let pendingRequestFailure = false;
 
 	async function maybeHop(ctx: OmniContext, reason: "probe" | "request-failure", status?: number): Promise<void> {
 		const hop = loadHopSettings(agentHome);
@@ -306,6 +316,7 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		healthTimer = undefined;
 		stopAutoSync();
 		sessionCtx = undefined;
+		pendingRequestFailure = false;
 	});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
@@ -319,10 +330,36 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	});
 
 	pi.on("after_provider_response", async (event, ctx) => {
+		const probeConfig = loadProbeConfig(agentHome);
+		if (ctx.model?.provider !== probeConfig.providerName) return;
 		if (!isUnreachableHttpStatus(event.status)) return;
+		pendingRequestFailure = true;
 		unreachable.reset();
 		if (ctx.hasUI) ctx.ui.setStatus("omni", "OmniRoute unreachable");
-		await maybeHop(ctx, "request-failure", event.status);
+	});
+
+	pi.on("agent_end", (event, ctx) => {
+		if (ctx.signal?.aborted) {
+			pendingRequestFailure = false;
+			return;
+		}
+		const probeConfig = loadProbeConfig(agentHome);
+		const lastAssistant = [...event.messages].reverse().find((message) => message.role === "assistant");
+		if (isUnreachableRequestFailure(lastAssistant, probeConfig.providerName)) {
+			pendingRequestFailure = true;
+			return;
+		}
+		if (lastAssistant?.role === "assistant" || event.willContinue !== true) pendingRequestFailure = false;
+	});
+
+	pi.on("agent_settled", async (_event, ctx) => {
+		if (!pendingRequestFailure) return;
+		pendingRequestFailure = false;
+		const probeConfig = loadProbeConfig(agentHome);
+		if (ctx.model?.provider !== probeConfig.providerName) return;
+		if (ctx.hasUI) ctx.ui.setStatus("omni", "OmniRoute unreachable");
+		unreachable.reset();
+		await maybeHop(ctx, "request-failure");
 	});
 
 	pi.on("model_select", (event, ctx) => {

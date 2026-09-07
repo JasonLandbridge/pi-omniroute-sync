@@ -1,6 +1,6 @@
 import { checkHealth } from "./provider.ts";
 import type { OmniConfig, OnUnreachable } from "./config.ts";
-import type { OmniContext } from "./contracts.ts";
+import type { AgentEndMessage, OmniContext } from "./contracts.ts";
 
 export type { OnUnreachable };
 
@@ -40,6 +40,15 @@ export function isUnreachableHttpStatus(status?: number): boolean {
 	return status === 0 || status === 408 || status >= 500;
 }
 
+// Response hooks do not see transport exceptions, so inspect the finalized assistant error as a fallback.
+const UNREACHABLE_ERROR_PATTERN =
+	/\b(?:408|5\d{2})\b|\b(?:ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN)\b|(?:fetch failed|network error|connection (?:error|failure|refused|reset|closed)|timed?\s*out|timeout|socket)/i;
+
+export function isUnreachableRequestFailure(message: AgentEndMessage | undefined, omniProviderName: string): boolean {
+	if (message?.role !== "assistant" || message.provider !== omniProviderName || message.stopReason !== "error") return false;
+	return UNREACHABLE_ERROR_PATTERN.test(message.errorMessage ?? "");
+}
+
 export function isOmniActiveModel(
 	model: { provider?: string } | undefined,
 	omniProviderName: string,
@@ -53,13 +62,22 @@ export function shouldAttemptHop(
 	if (options.onUnreachable !== "host-fallback") return false;
 	if (options.currentProvider && options.currentProvider !== options.omniProviderName) return false;
 	const target = parseFallbackModel(options.fallbackModel);
-	if (!target) return false;
+	if (!target || target.provider === options.omniProviderName) return false;
 	return !(options.currentProvider === target.provider && options.currentModelId === target.id);
 }
 
 export async function hopOnUnreachable(event: UnreachableEvent, options: UnreachableHopOptions): Promise<boolean> {
-	if (!shouldAttemptHop(options)) return false;
 	const target = parseFallbackModel(options.fallbackModel);
+	if (!shouldAttemptHop(options)) {
+		const activeOmni = !options.currentProvider || options.currentProvider === options.omniProviderName;
+		if (options.onUnreachable === "host-fallback" && activeOmni && (!target || target.provider === options.omniProviderName)) {
+			options.notify?.(
+				`OmniRoute unreachable at ${event.serverUrl}. Configure fallbackModel as an authenticated host provider/id, or use /model <provider/id> manually.`,
+				"warning",
+			);
+		}
+		return false;
+	}
 	if (!target) return false;
 
 	const model = options.findModel?.(target.provider, target.id);
@@ -127,7 +145,7 @@ export function hopOptionsFromContext(
 		...settings,
 		currentProvider: ctx.model?.provider,
 		currentModelId: ctx.model?.id,
-		findModel: ctx.modelRegistry?.find,
+		findModel: ctx.modelRegistry ? ctx.modelRegistry.find.bind(ctx.modelRegistry) : undefined,
 		setModel,
 		notify: ctx.hasUI ? ctx.ui.notify.bind(ctx.ui) : undefined,
 	};

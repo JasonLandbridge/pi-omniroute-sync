@@ -70,6 +70,7 @@ export interface AgentEndMessage {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: AgentEndMessage[];
+	willContinue?: boolean;
 }
 
 export interface OmniContext {

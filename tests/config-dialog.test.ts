@@ -284,11 +284,36 @@ describe("inline field editing", () => {
 		expect(rendered(component)).toContain("-1");
 	});
 
-	it("toggles gateway tok/s display in the draft", () => {
+	it("toggles unreachable behavior in the draft", () => {
 		const done = vi.fn();
 		const component = dialog(done);
 		goConfig(component);
 		for (let index = 0; index < 9; index++) component.handleInput("j");
+		component.handleInput(" ");
+		expect(rendered(component)).toContain("host-fallback");
+		expect(rendered(component)).toContain("Unreachable behavior set to host-fallback in draft");
+		component.handleInput("\x1b");
+		expect(done).toHaveBeenCalledWith({ ...baseSettings, onUnreachable: "host-fallback" });
+	});
+
+	it("edits the fallback model", () => {
+		const done = vi.fn();
+		const component = dialog(done);
+		goConfig(component);
+		for (let index = 0; index < 10; index++) component.handleInput("j");
+		component.handleInput("\r");
+		component.handleInput("anthropic/claude-sonnet-4");
+		component.handleInput("\r");
+		expect(rendered(component)).toContain("anthropic/claude-sonnet-4");
+		component.handleInput("\x1b");
+		expect(done).toHaveBeenCalledWith({ ...baseSettings, fallbackModel: "anthropic/claude-sonnet-4" });
+	});
+
+	it("toggles gateway tok/s display in the draft", () => {
+		const done = vi.fn();
+		const component = dialog(done);
+		goConfig(component);
+		for (let index = 0; index < 11; index++) component.handleInput("j");
 		component.handleInput(" ");
 		expect(rendered(component)).toContain("Gateway tok/s display disabled in draft");
 		component.handleInput("\x1b");
@@ -299,7 +324,7 @@ describe("inline field editing", () => {
 		const done = vi.fn();
 		const component = dialog(done);
 		goConfig(component);
-		for (let index = 0; index < 10; index++) component.handleInput("j");
+		for (let index = 0; index < 12; index++) component.handleInput("j");
 		component.handleInput("\r");
 		component.handleInput("new-secret");
 		expect(rendered(component)).not.toContain("new-secret");
@@ -312,7 +337,7 @@ describe("inline field editing", () => {
 		const done = vi.fn();
 		const component = dialog(done);
 		goConfig(component);
-		for (let index = 0; index < 11; index++) component.handleInput("j");
+		for (let index = 0; index < 13; index++) component.handleInput("j");
 		component.handleInput("\r");
 		expect(rendered(component)).toContain("already empty");
 		expect(done).not.toHaveBeenCalled();
@@ -385,6 +410,8 @@ describe("rendering", () => {
 		expect(output).toContain("Connection");
 		expect(output).toContain("Model visibility");
 		expect(output).toContain("Auto-sync interval");
+		expect(output).toContain("On unreachable");
+		expect(output).toContain("Fallback model");
 		expect(output).toContain("Show gateway tok/s");
 		expect(output).toContain("Credentials");
 		expect(output).not.toContain("secret");

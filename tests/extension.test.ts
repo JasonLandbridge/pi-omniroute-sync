@@ -232,6 +232,27 @@ describe("autosync lifecycle", () => {
 		expect(loadSettings(home).apiKey).toBe("");
 		pi.events.get("session_shutdown")!();
 	});
+
+	it("shows effective fallback settings without persisting environment overrides", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "none", fallbackModel: "" });
+		vi.stubEnv("OMNIROUTE_ON_UNREACHABLE", "host-fallback");
+		vi.stubEnv("OMNIROUTE_FALLBACK_MODEL", "anthropic/claude-sonnet-4");
+		const pi = fakePi();
+		const ui = context({
+			custom: vi.fn(async (factory: any): Promise<any> => {
+				let result: OmniSettings | undefined;
+				const component = await factory({ requestRender: vi.fn() }, { fg: (_color: unknown, text: string) => text, bold: (text: string) => text }, {}, (value: OmniSettings | undefined) => { result = value; });
+				component.handleInput("\x1b");
+				return result;
+			}) as unknown as OmniContext["ui"]["custom"],
+		});
+		await createExtension(home, pi);
+
+		await pi.commands.get("omni")!.handler("config", ui);
+
+		expect(JSON.parse(readFileSync(settingsPath(home), "utf8"))).toMatchObject({ onUnreachable: "none", fallbackModel: "" });
+	});
 });
 
 describe("provider request compatibility hook", () => {
@@ -246,5 +267,111 @@ describe("provider request compatibility hook", () => {
 		await hook({ payload }, ctx);
 
 		expect(providerMocks.transformProviderPayload).toHaveBeenCalledWith(payload, model, "omni");
+	});
+});
+
+describe("unreachable fallback lifecycle", () => {
+	it("switches before the next prompt when the configured server is unreachable", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
+		providerMocks.checkHealth.mockResolvedValue(false);
+		const pi = await createExtension(home);
+		pi.setModel = vi.fn().mockResolvedValue(true);
+		const fallback = { provider: "anthropic", id: "claude-sonnet-4" };
+		const registry = {
+			find(provider: string, id: string) {
+				return provider === fallback.provider && id === fallback.id ? fallback : undefined;
+			},
+		};
+		const ctx = { ...context(), model: { provider: "omni", id: "auto" }, modelRegistry: registry };
+
+		await pi.events.get("before_agent_start")!({}, ctx);
+
+		expect(pi.setModel).toHaveBeenCalledWith(fallback);
+	});
+
+	it("switches after a thrown OmniRoute connection failure", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
+		const pi = await createExtension(home);
+		pi.setModel = vi.fn().mockResolvedValue(true);
+		const fallback = { provider: "anthropic", id: "claude-sonnet-4" };
+		const registry = {
+			find(provider: string, id: string) {
+				return provider === fallback.provider && id === fallback.id ? fallback : undefined;
+			},
+		};
+		const ctx = { ...context(), model: { provider: "omni", id: "auto" }, modelRegistry: registry };
+
+		await pi.events.get("agent_end")!({
+			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "fetch failed: ECONNREFUSED" }],
+		}, ctx);
+		expect(pi.setModel).not.toHaveBeenCalled();
+		await pi.events.get("agent_settled")!({}, ctx);
+
+		expect(pi.setModel).toHaveBeenCalledWith(fallback);
+	});
+
+	it("hops after an HTTP failure when the agent finally settles", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
+		const pi = await createExtension(home);
+		pi.setModel = vi.fn().mockResolvedValue(true);
+		const fallback = { provider: "anthropic", id: "claude-sonnet-4" };
+		const registry = { find: vi.fn(() => fallback) };
+		const ctx = { ...context(), model: { provider: "omni", id: "auto" }, modelRegistry: registry };
+
+		await pi.events.get("after_provider_response")!({ status: 503, headers: {} }, ctx);
+		expect(pi.setModel).not.toHaveBeenCalled();
+		await pi.events.get("agent_end")!({
+			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "503: bad gateway" }],
+		}, ctx);
+		await pi.events.get("agent_settled")!({}, ctx);
+
+		expect(pi.setModel).toHaveBeenCalledWith(fallback);
+	});
+
+	it("does not hop when a retry recovers on OmniRoute", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
+		const pi = await createExtension(home);
+		pi.setModel = vi.fn().mockResolvedValue(true);
+		const ctx = { ...context(), model: { provider: "omni", id: "auto" } };
+
+		await pi.events.get("agent_end")!({
+			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "Connection error." }],
+			willContinue: true,
+		}, ctx);
+		await pi.events.get("agent_end")!({
+			messages: [{ role: "assistant", provider: "omni", stopReason: "stop" }],
+		}, ctx);
+		await pi.events.get("agent_settled")!({}, ctx);
+
+		expect(pi.setModel).not.toHaveBeenCalled();
+	});
+
+	it("does not hop for an aborted turn", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
+		const pi = await createExtension(home);
+		pi.setModel = vi.fn().mockResolvedValue(true);
+		const ctx = { ...context(), signal: AbortSignal.abort(), model: { provider: "omni", id: "auto" } };
+
+		await pi.events.get("agent_end")!({
+			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "Connection error." }],
+		}, ctx);
+		await pi.events.get("agent_settled")!({}, ctx);
+
+		expect(pi.setModel).not.toHaveBeenCalled();
+	});
+
+	it("does not mark OmniRoute down for another provider's failed response", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("after_provider_response")!({ status: 503, headers: {} }, { ...ui, model: { provider: "anthropic", id: "claude-sonnet-4" } });
+
+		expect(ui.ui.setStatus).not.toHaveBeenCalledWith("omni", "OmniRoute unreachable");
 	});
 });
