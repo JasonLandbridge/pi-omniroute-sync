@@ -37,7 +37,7 @@ describe("host adapters", () => {
 		expect(createOmniExtension).toHaveBeenCalledOnce();
 		const [received, options] = createOmniExtension.mock.calls[0];
 		expect(received).toBe(pi);
-		expect(options).toMatchObject({ homeEnvVar: "OMP_HOME", defaultHome: "~/.omp/agent" });
+		expect(options).toMatchObject({ homeEnvVar: "OMP_HOME", defaultHome: "~/.omp/agent", inferenceApi: "openai-completions" });
 		expect(options.matchesKey("\r", "enter")).toBe(true);
 		expect(options.createInput("initial").getValue()).toBe("initial");
 	});

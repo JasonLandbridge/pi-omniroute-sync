@@ -15,6 +15,7 @@ const baseSettings: OmniSettings = {
 	excludeModels: [],
 	syncOnStartup: true,
 	modelCacheTtlMinutes: 60,
+	autoSyncIntervalSeconds: 300,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "secret",
 };
@@ -255,11 +256,36 @@ describe("inline field editing", () => {
 		expect(rendered(component)).toContain("-1");
 	});
 
-	it("masks API-key editing and stages the replacement", () => {
+	it("edits the auto-sync interval in seconds", () => {
 		const done = vi.fn();
 		const component = dialog(done);
 		goConfig(component);
 		for (let index = 0; index < 8; index++) component.handleInput("j");
+		component.handleInput("\r");
+		component.handleInput("\x15");
+		component.handleInput("120");
+		component.handleInput("\r");
+		component.handleInput("\x1b");
+		expect(done).toHaveBeenCalledWith({ ...baseSettings, autoSyncIntervalSeconds: 120 });
+	});
+
+	it("rejects a negative auto-sync interval and keeps the editor open", () => {
+		const component = dialog();
+		goConfig(component);
+		for (let index = 0; index < 8; index++) component.handleInput("j");
+		component.handleInput("\r");
+		component.handleInput("\x15");
+		component.handleInput("-1");
+		component.handleInput("\r");
+		expect(rendered(component)).toContain("Auto-sync interval must be a non-negative number of seconds");
+		expect(rendered(component)).toContain("-1");
+	});
+
+	it("masks API-key editing and stages the replacement", () => {
+		const done = vi.fn();
+		const component = dialog(done);
+		goConfig(component);
+		for (let index = 0; index < 9; index++) component.handleInput("j");
 		component.handleInput("\r");
 		component.handleInput("new-secret");
 		expect(rendered(component)).not.toContain("new-secret");
@@ -272,7 +298,7 @@ describe("inline field editing", () => {
 		const done = vi.fn();
 		const component = dialog(done);
 		goConfig(component);
-		for (let index = 0; index < 9; index++) component.handleInput("j");
+		for (let index = 0; index < 10; index++) component.handleInput("j");
 		component.handleInput("\r");
 		expect(rendered(component)).toContain("already empty");
 		expect(done).not.toHaveBeenCalled();
@@ -344,6 +370,7 @@ describe("rendering", () => {
 		expect(output).toContain("OmniRoute");
 		expect(output).toContain("Connection");
 		expect(output).toContain("Model visibility");
+		expect(output).toContain("Auto-sync interval");
 		expect(output).toContain("Credentials");
 		expect(output).not.toContain("secret");
 		expect(output).toContain("┌");

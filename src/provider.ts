@@ -1,14 +1,19 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { modelsJsonPath, saveSettings, type OmniConfig, type OmniSettings } from "./config.ts";
-import type { OmniPI, ProviderEntry, ProviderModelConfig } from "./contracts.ts";
+import type { OmniPI, OmniRequestModel, OmniThinking, ProviderApi, ProviderCompat, ProviderEntry, ProviderModelConfig, ProviderThinkingLevel, ProviderThinkingLevelMap } from "./contracts.ts";
 
-const PROVIDER_API = "openai-responses";
-export const PROVIDER_COMPAT = {
+const DEFAULT_PROVIDER_API: ProviderApi = "openai-responses";
+export const PROVIDER_COMPAT: ProviderCompat = {
 	sessionAffinityFormat: "openrouter",
+	promptCacheSessionHeader: "x-session-id",
 	supportsLongCacheRetention: true,
-} as const;
+};
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tiers: [] } as const;
+const THINKING_LEVELS: ProviderThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+const OMP_EFFORTS = new Set<string>(THINKING_LEVELS);
+const VISUAL_MODALITIES = new Set(["image", "pdf", "video"]);
+const NON_CHAT_TYPES = new Set(["image", "embedding", "rerank", "audio", "video", "pdf"]);
 export const AUTO_MODELS = [
 	"auto",
 	"auto/coding",
@@ -22,6 +27,23 @@ export const AUTO_MODELS = [
 	"auto/best-coding",
 ];
 
+let activeInferenceApi: ProviderApi = DEFAULT_PROVIDER_API;
+
+export function setInferenceApi(api?: ProviderApi): void {
+	activeInferenceApi = api === "openai-completions" ? "openai-completions" : DEFAULT_PROVIDER_API;
+}
+
+function providerApi(): ProviderApi {
+	return activeInferenceApi;
+}
+
+function modelCompat(omitMaxOutputTokens = false): ProviderCompat {
+	return {
+		...PROVIDER_COMPAT,
+		...(providerApi() === DEFAULT_PROVIDER_API && omitMaxOutputTokens ? { supportsMaxOutputTokens: false } : {}),
+	};
+}
+
 interface OmniApiModel {
 	id?: string;
 	name?: string;
@@ -31,7 +53,18 @@ interface OmniApiModel {
 	max_output_tokens?: number;
 	max_tokens?: number;
 	reasoning?: boolean;
-	capabilities?: { reasoning?: boolean; thinking?: boolean };
+	effort_tiers?: unknown;
+	capabilities?: {
+		reasoning?: boolean;
+		thinking?: boolean;
+		supportsThinking?: boolean;
+		vision?: boolean;
+		attachment?: boolean;
+		pdf?: boolean;
+		video?: boolean;
+		tool_calling?: boolean;
+		effort_tiers?: unknown;
+	};
 	input_modalities?: unknown;
 	input?: unknown;
 	output_modalities?: unknown;
@@ -47,7 +80,11 @@ interface SyncedModel {
 	enabled?: boolean;
 	contextWindow?: number;
 	maxTokens?: number;
+	omitMaxOutputTokens?: boolean;
 	reasoning?: boolean;
+	supportsTools?: boolean;
+	thinking?: OmniThinking;
+	thinkingLevelMap?: ProviderThinkingLevelMap;
 	input?: string[];
 }
 
@@ -100,6 +137,32 @@ async function requestJson<T>(
 	return (text ? JSON.parse(text) : {}) as T;
 }
 
+/** Older hosts build these fields without reading newer catalog capability metadata. */
+export function transformProviderPayload(payload: unknown, model: OmniRequestModel | undefined, providerName: string): unknown {
+	if (!model || model.provider !== providerName || typeof payload !== "object" || payload === null || Array.isArray(payload)) return payload;
+
+	const next = { ...(payload as Record<string, unknown>) };
+	let changed = false;
+	const remove = (key: string): void => {
+		if (key in next) {
+			delete next[key];
+			changed = true;
+		}
+	};
+
+	if (model.omitMaxOutputTokens) {
+		remove("max_output_tokens");
+		remove("max_tokens");
+		remove("max_completion_tokens");
+	}
+	if (model.supportsTools === false) {
+		remove("tools");
+		remove("tool_choice");
+		remove("parallel_tool_calls");
+	}
+	return changed ? next : payload;
+}
+
 export async function checkHealth(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {
 	try {
 		const res = await fetch(`${config.serverUrl}/api/health/ping`, {
@@ -113,20 +176,75 @@ export async function checkHealth(config: OmniConfig, signal?: AbortSignal): Pro
 	}
 }
 
-function normalizeModalities(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-	const out: string[] = [];
-	for (const item of value) {
-		const normalized = String(item).trim().toLowerCase();
-		if ((normalized === "text" || normalized === "image") && !out.includes(normalized)) out.push(normalized);
+export async function checkModelsEndpoint(config: OmniConfig, signal?: AbortSignal): Promise<boolean> {
+	try {
+		const res = await fetch(`${config.serverUrl}/v1/models`, {
+			headers: authHeaders(config),
+			signal: requestSignal(5_000, signal),
+		});
+		return res.ok;
+	} catch (error) {
+		if (signal?.aborted) throw error;
+		return false;
 	}
-	return out;
+}
+
+function rawModalities(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.map((item) => String(item).trim().toLowerCase()).filter(Boolean);
+}
+
+function normalizeInputModalities(model: OmniApiModel): string[] {
+	const raw = rawModalities(model.input_modalities ?? model.input);
+	const capabilities = model.capabilities;
+	const visual =
+		raw.some((item) => VISUAL_MODALITIES.has(item)) ||
+		capabilities?.vision === true ||
+		capabilities?.attachment === true ||
+		capabilities?.pdf === true ||
+		capabilities?.video === true;
+	return visual ? ["text", "image"] : ["text"];
 }
 
 function isPiChatModel(model: OmniApiModel): boolean {
-	const output = normalizeModalities(model.output_modalities ?? model.output);
-	if (String(model.type || "chat").toLowerCase() === "image") return false;
-	return output.length === 0 || output.includes("text");
+	const type = String(model.type || "chat").toLowerCase();
+	if (NON_CHAT_TYPES.has(type)) return false;
+	const output = rawModalities(model.output_modalities ?? model.output);
+	if (output.length === 0) return true;
+	return output.includes("text");
+}
+
+function mapThinking(model: OmniApiModel): OmniThinking | undefined {
+	const raw = Array.isArray(model.effort_tiers)
+		? model.effort_tiers
+		: Array.isArray(model.capabilities?.effort_tiers)
+			? model.capabilities.effort_tiers
+			: undefined;
+	if (!raw) return undefined;
+	const efforts = Array.from(
+		new Set(
+			raw
+				.filter((item): item is string => typeof item === "string")
+				.map((item) => item.trim().toLowerCase())
+				.filter((item) => OMP_EFFORTS.has(item)),
+		),
+	);
+	if (efforts.length === 0) return undefined;
+	return { mode: "effort", efforts };
+}
+
+function thinkingLevelMap(thinking: OmniThinking | undefined): ProviderThinkingLevelMap | undefined {
+	if (!thinking) return undefined;
+	const supported = new Set(thinking.efforts);
+	return {
+		off: "none",
+		...Object.fromEntries(THINKING_LEVELS.map((level) => [level, supported.has(level) ? level : null])),
+	} as ProviderThinkingLevelMap;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+	const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+	return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function upsertSyncedModel(models: SyncedModel[], next: SyncedModel): void {
@@ -143,7 +261,11 @@ function upsertSyncedModel(models: SyncedModel[], next: SyncedModel): void {
 		input: input.length > 0 ? input : existing.input,
 		contextWindow: next.contextWindow ?? existing.contextWindow,
 		maxTokens: next.maxTokens ?? existing.maxTokens,
+		omitMaxOutputTokens: next.omitMaxOutputTokens ?? existing.omitMaxOutputTokens,
 		reasoning: existing.reasoning || next.reasoning,
+		supportsTools: next.supportsTools ?? existing.supportsTools,
+		thinking: next.thinking ?? existing.thinking,
+		thinkingLevelMap: next.thinkingLevelMap ?? existing.thinkingLevelMap,
 	};
 }
 
@@ -184,24 +306,35 @@ export function usableProviderAliases(connections: ProviderConnection[], pricing
 	return aliases;
 }
 
-async function fetchUsableProviders(config: OmniConfig, signal?: AbortSignal): Promise<Set<string>> {
-	const [providers, pricing] = await Promise.all([
-		requestJson<{ connections?: ProviderConnection[] }>(config, "/api/providers?limit=10000", {}, 10_000, signal),
-		requestJson<Record<string, PricingProvider>>(config, "/api/pricing/models", {}, 10_000, signal),
-	]);
-	return usableProviderAliases(providers.connections ?? [], Object.values(pricing));
+async function fetchUsableProviders(config: OmniConfig, signal?: AbortSignal): Promise<Set<string> | undefined> {
+	try {
+		const [providers, pricing] = await Promise.all([
+			requestJson<{ connections?: ProviderConnection[] }>(config, "/api/providers?limit=10000", {}, 10_000, signal),
+			requestJson<Record<string, PricingProvider>>(config, "/api/pricing/models", {}, 10_000, signal),
+		]);
+		return usableProviderAliases(providers.connections ?? [], Object.values(pricing));
+	} catch (error) {
+		if (signal?.aborted) throw error;
+		return undefined;
+	}
 }
 
 async function fetchPricing(config: OmniConfig, signal?: AbortSignal): Promise<Record<string, ModelPricing>> {
-	const providers = await requestJson<Record<string, Record<string, ModelPricing>>>(config, "/api/pricing", {}, 10_000, signal);
-	const result: Record<string, ModelPricing> = {};
-	for (const [provider, models] of Object.entries(providers)) {
-		for (const [model, pricing] of Object.entries(models)) {
-			result[`${provider}/${model}`] = pricing;
-			result[model] ??= pricing;
+	try {
+		const providers = await requestJson<Record<string, Record<string, ModelPricing>>>(config, "/api/pricing", {}, 10_000, signal);
+		const result: Record<string, ModelPricing> = {};
+		for (const [provider, models] of Object.entries(providers)) {
+			if (!models || typeof models !== "object") continue;
+			for (const [model, pricing] of Object.entries(models)) {
+				result[`${provider}/${model}`] = pricing;
+				result[model] ??= pricing;
+			}
 		}
+		return result;
+	} catch (error) {
+		if (signal?.aborted) throw error;
+		return {};
 	}
-	return result;
 }
 
 export function modelCost(pricing?: ModelPricing): ProviderModelConfig["cost"] {
@@ -227,14 +360,30 @@ async function fetchSyncedModels(config: OmniConfig, signal?: AbortSignal): Prom
 		const model: OmniApiModel = typeof rawModel === "string" ? { id: rawModel } : rawModel;
 		if (!model.id || !isPiChatModel(model)) continue;
 
-		const synced: SyncedModel = { id: model.id, name: model.name ?? model.id, owned_by: model.owned_by, enabled: model.enabled };
-		const input = normalizeModalities(model.input_modalities ?? model.input);
-		synced.input = input.length > 0 ? input : ["text"];
-		const contextWindow = model.context_length || model.max_input_tokens;
+		const contextWindow = positiveNumber(model.context_length) ?? positiveNumber(model.max_input_tokens);
+		const maxTokens = positiveNumber(model.max_output_tokens) ?? positiveNumber(model.max_tokens);
+		const toolCalling = model.capabilities?.tool_calling;
+		const thinking = mapThinking(model);
+		const synced: SyncedModel = {
+			id: model.id,
+			name: model.name ?? model.id,
+			owned_by: model.owned_by,
+			enabled: model.enabled,
+			input: normalizeInputModalities(model),
+			reasoning: Boolean(
+				model.reasoning ||
+					model.capabilities?.reasoning ||
+					model.capabilities?.thinking ||
+					model.capabilities?.supportsThinking,
+			),
+			thinking,
+			thinkingLevelMap: thinkingLevelMap(thinking),
+			omitMaxOutputTokens: !maxTokens,
+		};
 		if (contextWindow) synced.contextWindow = contextWindow;
-		const maxTokens = model.max_output_tokens || model.max_tokens;
 		if (maxTokens) synced.maxTokens = maxTokens;
-		if (model.reasoning || model.capabilities?.reasoning || model.capabilities?.thinking) synced.reasoning = true;
+		if (toolCalling === true) synced.supportsTools = true;
+		if (toolCalling === false) synced.supportsTools = false;
 		upsertSyncedModel(results, synced);
 	}
 
@@ -247,24 +396,35 @@ async function fetchSyncedModels(config: OmniConfig, signal?: AbortSignal): Prom
 }
 
 function buildModel(model: SyncedModel, pricing?: ModelPricing): ProviderModelConfig {
-	return {
+	const contextWindow = model.contextWindow ?? 128_000;
+	const maxTokens = model.maxTokens ?? contextWindow;
+	const config: ProviderModelConfig = {
 		id: model.id,
 		name: model.name,
-		api: PROVIDER_API,
+		api: providerApi(),
 		reasoning: model.reasoning ?? false,
 		input: model.input ?? ["text"],
 		cost: modelCost(pricing),
-		contextWindow: model.contextWindow ?? 128_000,
-		maxTokens: model.maxTokens ?? 16_384,
+		contextWindow,
+		maxTokens,
+		compat: modelCompat(model.omitMaxOutputTokens),
 	};
+	if (model.omitMaxOutputTokens) config.omitMaxOutputTokens = true;
+	if (model.supportsTools !== undefined) config.supportsTools = model.supportsTools;
+	if (model.thinking) {
+		config.thinking = model.thinking;
+		if (providerApi() === DEFAULT_PROVIDER_API) config.thinkingLevelMap = model.thinkingLevelMap ?? thinkingLevelMap(model.thinking);
+	}
+	return config;
 }
 
 function buildAutoModel(id: string): ProviderModelConfig {
 	return buildModel({
 		id,
 		name: id,
-		reasoning: id === "auto/coding" || id === "auto/smart",
+		reasoning: /coding|smart|reasoning|pro-/.test(id),
 		input: ["text", "image"],
+		omitMaxOutputTokens: true,
 	});
 }
 
@@ -278,7 +438,15 @@ export async function discoverModels(config: OmniConfig, settings: OmniSettings,
 	return [
 		...(settings.showGlobalRoutingModels ? AUTO_MODELS.filter((id) => !syncedIds.has(id)).map(buildAutoModel) : []),
 		...synced
-			.filter((model) => shouldIncludeModel(model, settings, usableProviders))
+			.filter((model) =>
+				shouldIncludeModel(
+					model,
+					usableProviders === undefined && settings.onlyShowUsableModels
+						? { ...settings, onlyShowUsableModels: false }
+						: settings,
+					usableProviders,
+				),
+			)
 			.map((model) => buildModel(model, pricing[model.id] ?? pricing[model.id.split("/").at(-1) ?? model.id])),
 	];
 }
@@ -287,7 +455,7 @@ function buildProviderEntry(config: OmniConfig, models: ProviderModelConfig[]): 
 	return {
 		baseUrl: `${config.serverUrl}/v1`,
 		apiKey: config.apiKey || "omniroute-public",
-		api: PROVIDER_API,
+		api: providerApi(),
 		authHeader: true,
 		compat: PROVIDER_COMPAT,
 		models,
@@ -306,13 +474,18 @@ function persistModels(agentHome: string, config: OmniConfig, models: ProviderMo
 	const path = modelsJsonPath(agentHome);
 	const file = readModelsJson(agentHome);
 	file.providers ??= {};
+	const persistedModels = models.map((model) => {
+		if (!model.omitMaxOutputTokens) return model;
+		const { maxTokens: _maxTokens, ...withoutMaxTokens } = model;
+		return withoutMaxTokens as ProviderModelConfig;
+	});
 	file.providers[config.providerName] = {
 		baseUrl: `${config.serverUrl}/v1`,
-		api: PROVIDER_API,
+		api: providerApi(),
 		auth: "none",
 		authHeader: true,
 		compat: PROVIDER_COMPAT,
-		models,
+		models: persistedModels,
 	};
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, JSON.stringify(file, null, 2));
@@ -333,16 +506,31 @@ export async function registerOmniProvider(
 }
 
 export function normalizePersistedModels(models: Array<Partial<ProviderModelConfig>>): ProviderModelConfig[] {
-	return models.filter((model): model is Partial<ProviderModelConfig> & Pick<ProviderModelConfig, "id"> => Boolean(model.id)).map((model) => ({
-		id: model.id,
-		name: model.name ?? model.id,
-		api: PROVIDER_API,
-		reasoning: model.reasoning ?? false,
-		input: model.input ?? ["text"],
-		cost: { ...ZERO_COST, ...model.cost, tiers: model.cost?.tiers ?? [] },
-		contextWindow: model.contextWindow ?? 128_000,
-		maxTokens: model.maxTokens ?? 16_384,
-	}));
+	return models.filter((model): model is Partial<ProviderModelConfig> & Pick<ProviderModelConfig, "id"> => Boolean(model.id)).map((model) => {
+		const contextWindow = model.contextWindow ?? 128_000;
+		const hasOutputLimit = typeof model.maxTokens === "number" && Number.isFinite(model.maxTokens) && model.maxTokens > 0;
+		const omitMaxOutputTokens = model.omitMaxOutputTokens ?? !hasOutputLimit;
+		const next: ProviderModelConfig = {
+			id: model.id,
+			name: model.name ?? model.id,
+			api: providerApi(),
+			reasoning: model.reasoning ?? false,
+			input: model.input ?? ["text"],
+			cost: { ...ZERO_COST, ...model.cost, tiers: model.cost?.tiers ?? [] },
+			contextWindow,
+			maxTokens: model.maxTokens ?? contextWindow,
+			compat: { ...modelCompat(omitMaxOutputTokens), ...model.compat },
+		};
+		if (omitMaxOutputTokens) next.omitMaxOutputTokens = true;
+		if (model.supportsTools !== undefined) next.supportsTools = model.supportsTools;
+		if (model.thinking) {
+			next.thinking = model.thinking;
+			if (providerApi() === DEFAULT_PROVIDER_API) next.thinkingLevelMap = model.thinkingLevelMap ?? thinkingLevelMap(model.thinking);
+		} else if (model.thinkingLevelMap) {
+			next.thinkingLevelMap = model.thinkingLevelMap;
+		}
+		return next;
+	});
 }
 
 export function isSyncStale(
@@ -359,7 +547,7 @@ export function reloadOmniProvider(pi: OmniPI, agentHome: string, config: OmniCo
 	pi.registerProvider(config.providerName, {
 		baseUrl: persisted.baseUrl,
 		apiKey: config.apiKey || "omniroute-public",
-		api: PROVIDER_API,
+		api: providerApi(),
 		authHeader: true,
 		compat: PROVIDER_COMPAT,
 		models,
@@ -372,6 +560,25 @@ interface ResponsesResult {
 }
 
 export async function testChat(config: OmniConfig, model: string, signal?: AbortSignal): Promise<string> {
+	if (providerApi() === "openai-completions") {
+		const data = await requestJson<{ choices?: Array<{ message?: { content?: string } }> }>(
+			config,
+			"/v1/chat/completions",
+			{
+				method: "POST",
+				body: JSON.stringify({
+					model,
+					messages: [{ role: "user", content: "Reply with exactly: ok" }],
+					stream: false,
+					max_tokens: 8,
+				}),
+			},
+			20_000,
+			signal,
+		);
+		const content = data.choices?.[0]?.message?.content;
+		return typeof content === "string" ? content.trim() : JSON.stringify(data).slice(0, 200);
+	}
 	const data = await requestJson<ResponsesResult>(
 		config,
 		"/v1/responses",

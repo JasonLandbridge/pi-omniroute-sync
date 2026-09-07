@@ -12,10 +12,12 @@
 - A polished, tabbed `/omni config` overlay.
 - Stable session affinity and prompt-cache reuse through OmniRoute's `x-session-id` header.
 - Models in the standard `/model` picker.
-- Strict filtering based on active OmniRoute provider connections.
+- Strict filtering based on active OmniRoute provider connections when management endpoints are available.
+- Catalog metadata for context windows, output limits, vision, tool calling, and reasoning effort tiers.
 - Optional include and exclude model globs.
 - Optional global `auto` and `auto/*` routing models.
-- Real cost metadata from OmniRoute's pricing API.
+- Real cost metadata from OmniRoute's pricing API, with zero-cost fallback when pricing is unavailable.
+- Background catalog autosync while a session is running, configurable from `/omni config` or `/omni autosync`.
 - Secure extension-owned settings; API keys are never copied to `models.json`.
 - Health status, model browsing, and direct model testing commands. Health checks use OmniRoute's lightweight `/api/health/ping` endpoint instead of downloading the full model catalog.
 
@@ -76,7 +78,7 @@ omp install git:github.com/JasonLandbridge/pi-omniroute-sync
 
    You may enter a URL ending in `/v1`; the extension normalizes it to the server base URL.
 
-4. Enter an OmniRoute inference API key with `manage` or `admin` scope, or leave it empty if your server does not require authentication.
+4. Enter an OmniRoute inference API key, or leave it empty if your server does not require authentication. Management scope is optional; it enables stricter provider filtering and pricing lookup.
 5. Open the normal model picker:
 
    ```text
@@ -96,9 +98,10 @@ You can rerun `/omni setup` whenever the server URL or API key changes. Pressing
 | `/omni sync` | Performs a strict model discovery, registers the provider, updates `models.json`, and records a successful-sync timestamp. |
 | `/omni models` | Discovers and lists available models grouped by provider prefix. |
 | `/omni models <search>` | Lists models whose ID or display name contains the search text. |
-| `/omni test <model-id>` | Sends a small non-streaming request to `/v1/responses` and displays the result. |
+| `/omni test <model-id>` | Sends a small non-streaming request through the configured inference API (`/v1/responses` in Pi or `/v1/chat/completions` in OMP) and displays the result. |
 | `/omni dashboard` | Displays the configured OmniRoute base URL. `/omni dash` is also accepted. |
-| `/omni config` | Opens the Summary and Config overlay in TUI mode. |
+| `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval. |
+| `/omni autosync [status\|on\|off\|<seconds>]` | Shows or changes the background catalog refresh interval in seconds. `0`/`off` disables it; the default is 300 seconds (5 minutes). |
 | `/omni help` | Displays the built-in command summary. |
 
 Examples:
@@ -107,7 +110,10 @@ Examples:
 /omni models gemini
 /omni test openai/gpt-5
 /omni sync
+/omni autosync 300
 ```
+
+Autosync runs only while the host session is active. It refreshes the catalog in the background, keeps the last successful catalog when a refresh fails, and stops when the session shuts down. The interval is also editable as **Auto-sync interval** in the `/omni config` dialog; enter seconds, or `0` to disable it.
 
 
 ## Settings
@@ -129,6 +135,7 @@ Default settings:
   "excludeModels": [],
   "syncOnStartup": true,
   "modelCacheTtlMinutes": 60,
+  "autoSyncIntervalSeconds": 300,
   "lastSuccessfulSyncAt": 0,
   "apiKey": ""
 }
@@ -146,11 +153,12 @@ Default settings:
 | `excludeModels` | string[] | `[]` | Advertised catalog models matching any pattern are hidden. Excludes win over includes. |
 | `syncOnStartup` | boolean | `true` | Performs at most one model synchronization during session startup when the cache is stale. |
 | `modelCacheTtlMinutes` | number | `60` | Number of minutes before the last successful sync is stale. Must be non-negative; `0` means always stale. |
+| `autoSyncIntervalSeconds` | number | `300` | Background catalog refresh interval in seconds while a session is running. Configure it in `/omni config` or `/omni autosync`; `0` disables autosync. |
 | `lastSuccessfulSyncAt` | number | `0` | Unix timestamp in milliseconds maintained automatically after successful syncs. `0` means no successful sync has been recorded. |
 | `apiKey` | string | empty | Bearer token sent to OmniRoute. Stored only in the protected extension settings file. |
 
 
-Note: OmniRoute's `/v1/models` response can include models from providers that have no configured credentials or active connection. The default `onlyShowUsableModels: true` prevents those catalog-only models from appearing.
+Note: OmniRoute's `/v1/models` response can include models from providers that have no configured credentials or active connection. The default `onlyShowUsableModels: true` hides those catalog-only models when `/api/providers` is available. If provider verification is unavailable (for example, an inference-only key receives `403`), synchronization fails open and keeps the advertised catalog visible.
 
 Models explicitly marked `enabled: false` are also hidden while usable-only filtering is enabled.
 
@@ -250,7 +258,24 @@ OmniRoute prices are interpreted directly as USD per million tokens and mapped t
 
 Missing values default to `0`. Every model receives complete cost metadata, including `tiers: []`, so Pi can safely consume both newly synchronized and older persisted model records.
 
-A failure to fetch or parse `/api/pricing` aborts synchronization before the existing provider is replaced.
+A failure to fetch or parse `/api/pricing` falls back to zero-cost metadata; it does not abort synchronization or replace the existing provider with an incomplete result.
+
+## Catalog Metadata
+
+Each synchronization maps OmniRoute `/v1/models` metadata onto the host model catalog:
+
+| OmniRoute metadata | Pi/OMP model metadata |
+|---|---|
+| `context_length` or `max_input_tokens` | `contextWindow` |
+| `max_output_tokens` or `max_tokens` | `maxTokens` |
+| Missing output limit | Omits the output-token field on the wire through the host compatibility hook |
+| `input_modalities` and `capabilities.vision`, `attachment`, `pdf`, or `video` | `input: ["text", "image"]` |
+| `capabilities.tool_calling` | `supportsTools` |
+| `effort_tiers` (top-level or under `capabilities`) | Reasoning effort controls |
+
+Audio, video, and PDF remain gateway capabilities because Pi and OMP only accept `text` and `image` as stored input kinds. Vision-capable models are advertised as accepting `image` input.
+
+Pi uses the Responses API by default. The OMP adapter uses OpenAI Chat Completions and preserves the same normal `/model <model-id>` workflow.
 
 ## Environment Overrides
 
@@ -357,6 +382,8 @@ With `onlyShowUsableModels: true`, confirm in OmniRoute that the provider connec
 - Is active.
 - Has no failed test status.
 - Has an alias mapping in `/api/pricing/models` when its catalog prefix differs from its canonical provider name.
+
+If the key cannot access `/api/providers` or `/api/pricing/models`, the extension fails open and shows the advertised catalog instead of hiding every namespaced model. Pricing will be zero until a later successful sync.
 
 Also inspect `includeModels` and `excludeModels`. Exclude patterns always win.
 

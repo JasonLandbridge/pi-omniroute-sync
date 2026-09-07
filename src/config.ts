@@ -18,6 +18,8 @@ export interface OmniSettings {
 	excludeModels: string[];
 	syncOnStartup: boolean;
 	modelCacheTtlMinutes: number;
+	/** Background catalog refresh while the host is running. 0 disables. Default 300 seconds. */
+	autoSyncIntervalSeconds: number;
 	lastSuccessfulSyncAt: number;
 	apiKey: string;
 }
@@ -32,6 +34,7 @@ const DEFAULT_SETTINGS: OmniSettings = {
 	excludeModels: [],
 	syncOnStartup: true,
 	modelCacheTtlMinutes: 60,
+	autoSyncIntervalSeconds: 300,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "",
 };
@@ -52,6 +55,9 @@ export function settingsPath(agentHome: string): string {
 }
 
 export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
+	// Accept settings written by the short-lived millisecond version of autosync.
+	const legacyIntervalMs = (input as { autoSyncIntervalMs?: unknown }).autoSyncIntervalMs;
+	const intervalSeconds = input.autoSyncIntervalSeconds ?? (typeof legacyIntervalMs === "number" ? legacyIntervalMs / 1000 : undefined);
 	return {
 		serverUrl: normalizeServerUrl(String(input.serverUrl || DEFAULT_SETTINGS.serverUrl)),
 		providerName: String(input.providerName || DEFAULT_SETTINGS.providerName).trim() || DEFAULT_SETTINGS.providerName,
@@ -64,6 +70,10 @@ export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
 			Number.isFinite(input.modelCacheTtlMinutes) && input.modelCacheTtlMinutes! >= 0
 				? input.modelCacheTtlMinutes!
 				: DEFAULT_SETTINGS.modelCacheTtlMinutes,
+		autoSyncIntervalSeconds:
+			typeof intervalSeconds === "number" && Number.isFinite(intervalSeconds) && intervalSeconds >= 0
+				? Math.floor(intervalSeconds)
+				: DEFAULT_SETTINGS.autoSyncIntervalSeconds,
 		lastSuccessfulSyncAt:
 			Number.isFinite(input.lastSuccessfulSyncAt) && input.lastSuccessfulSyncAt! >= 0 ? input.lastSuccessfulSyncAt! : 0,
 		apiKey: String(input.apiKey ?? ""),

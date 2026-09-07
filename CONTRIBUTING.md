@@ -35,6 +35,7 @@ Then exercise the user flow:
 ```text
 /omni setup
 /omni config
+/omni autosync status
 /omni sync
 /model
 ```
@@ -56,13 +57,14 @@ The test suite covers:
 
 - Pi and OMP adapter loading and host-specific configuration.
 - Settings defaults, normalization, secure persistence, and environment-independent paths.
-- Responses provider metadata and legacy model normalization.
-- Strict usable-provider filtering and provider aliases.
+- Responses/Completions provider metadata, catalog capability mapping, legacy model normalization, and request compatibility filtering.
+- Strict usable-provider filtering and provider aliases, including management-endpoint fail-open behavior.
 - Global route detection and visibility.
 - Include/exclude glob matching and precedence.
 - Pricing field mapping and invalid numeric values.
 - Startup synchronization staleness and TTL boundaries.
-- Config-dialog navigation, staged editing, native key handling, masking, validation, save/discard behavior, and in-place synchronization.
+- Autosync lifecycle, interval validation, setup activation, shutdown cleanup, and environment-secret preservation.
+- Config-dialog navigation, staged editing, native key handling, masking, validation, autosync interval editing, save/discard behavior, and in-place synchronization.
 
 For behavior that depends on a real OmniRoute deployment, also verify `/omni setup`, `/omni sync`, `/omni test <model>`, and model selection manually.
 

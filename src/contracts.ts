@@ -36,17 +36,44 @@ export interface OmniUI {
 	setStatus(key: string, text: string | undefined): void;
 }
 
+export interface OmniRequestModel {
+	provider?: string;
+	omitMaxOutputTokens?: boolean;
+	supportsTools?: boolean;
+}
+
+export interface ProviderRequestEvent {
+	payload: unknown;
+}
+
 export interface OmniContext {
 	hasUI: boolean;
 	mode: "tui" | "rpc" | "json" | "print";
+	model?: OmniRequestModel;
 	signal?: AbortSignal;
 	ui: OmniUI;
+}
+
+export type ProviderApi = "openai-completions" | "openai-responses";
+export type ProviderThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ProviderThinkingLevelMap = Partial<Record<ProviderThinkingLevel, string | null>>;
+
+export interface OmniThinking {
+	mode: "effort";
+	efforts: string[];
+}
+
+export interface ProviderCompat {
+	sessionAffinityFormat?: "openrouter" | "openai";
+	promptCacheSessionHeader?: string;
+	supportsLongCacheRetention?: boolean;
+	supportsMaxOutputTokens?: boolean;
 }
 
 export interface ProviderModelConfig {
 	id: string;
 	name: string;
-	api: "openai-responses";
+	api: ProviderApi;
 	reasoning: boolean;
 	input: string[];
 	cost: {
@@ -64,18 +91,20 @@ export interface ProviderModelConfig {
 	};
 	contextWindow: number;
 	maxTokens: number;
+	omitMaxOutputTokens?: boolean;
+	supportsTools?: boolean;
+	thinkingLevelMap?: ProviderThinkingLevelMap;
+	thinking?: OmniThinking;
+	compat?: ProviderCompat;
 }
 
 export interface ProviderEntry {
 	baseUrl: string;
 	apiKey: string;
-	api: "openai-responses";
+	api: ProviderApi;
 	auth?: "apiKey" | "none" | "oauth";
 	authHeader: boolean;
-	compat: {
-		sessionAffinityFormat: "openrouter";
-		supportsLongCacheRetention: true;
-	};
+	compat: ProviderCompat;
 	models: ProviderModelConfig[];
 }
 
@@ -102,6 +131,7 @@ export interface OmniPI {
 		},
 	): void;
 	on(event: "session_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "before_provider_request", handler: (event: ProviderRequestEvent, ctx: OmniContext) => unknown | Promise<unknown>): void;
 	on(event: "session_shutdown", handler: () => void): void;
 	on(
 		event: "model_select",
@@ -114,4 +144,6 @@ export interface AgentHomeOptions {
 	defaultHome: string;
 	matchesKey(data: string, key: string): boolean;
 	createInput(initialValue: string): OmniInput;
+	/** Wire API for OmniRoute. OMP uses chat completions; Pi defaults to Responses. */
+	inferenceApi?: ProviderApi;
 }
