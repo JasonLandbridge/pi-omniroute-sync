@@ -46,6 +46,7 @@ it("normalizes persisted auto-sync values at the settings boundary", () => {
 	expect(sanitizeSettings({ autoSyncIntervalSeconds: Number.NaN })).toMatchObject({ autoSyncIntervalSeconds: 300 });
 	expect(sanitizeSettings({ autoSyncIntervalSeconds: "12345" as unknown as number })).toMatchObject({ autoSyncIntervalSeconds: 300 });
 	expect(sanitizeSettings({ autoSyncIntervalMs: 120_000 } as Partial<OmniSettings> & { autoSyncIntervalMs: number })).toMatchObject({ autoSyncIntervalSeconds: 120 });
+	expect(sanitizeSettings({ showGatewayTokensPerSecond: false }).showGatewayTokensPerSecond).toBe(false);
 });
 
 describe("loadSettings", () => {
@@ -64,6 +65,7 @@ describe("loadSettings", () => {
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
 			autoSyncIntervalSeconds: 300,
+			showGatewayTokensPerSecond: false,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "",
 		});
@@ -85,6 +87,7 @@ describe("loadSettings", () => {
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
 			autoSyncIntervalSeconds: 300,
+			showGatewayTokensPerSecond: false,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "",
 		});
@@ -110,6 +113,7 @@ describe("saveConfig", () => {
 			syncOnStartup: true,
 			modelCacheTtlMinutes: 60,
 			autoSyncIntervalSeconds: 300,
+			showGatewayTokensPerSecond: false,
 			lastSuccessfulSyncAt: 0,
 			apiKey: "secret",
 		});

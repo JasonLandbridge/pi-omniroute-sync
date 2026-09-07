@@ -20,6 +20,8 @@ export interface OmniSettings {
 	modelCacheTtlMinutes: number;
 	/** Background catalog refresh while the host is running. 0 disables. Default 300 seconds. */
 	autoSyncIntervalSeconds: number;
+	/** Display gateway-reported tok/s after OmniRoute turns. */
+	showGatewayTokensPerSecond: boolean;
 	lastSuccessfulSyncAt: number;
 	apiKey: string;
 }
@@ -35,6 +37,7 @@ const DEFAULT_SETTINGS: OmniSettings = {
 	syncOnStartup: true,
 	modelCacheTtlMinutes: 60,
 	autoSyncIntervalSeconds: 300,
+	showGatewayTokensPerSecond: false,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "",
 };
@@ -74,6 +77,7 @@ export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
 			typeof intervalSeconds === "number" && Number.isFinite(intervalSeconds) && intervalSeconds >= 0
 				? Math.floor(intervalSeconds)
 				: DEFAULT_SETTINGS.autoSyncIntervalSeconds,
+		showGatewayTokensPerSecond: input.showGatewayTokensPerSecond === true,
 		lastSuccessfulSyncAt:
 			Number.isFinite(input.lastSuccessfulSyncAt) && input.lastSuccessfulSyncAt! >= 0 ? input.lastSuccessfulSyncAt! : 0,
 		apiKey: String(input.apiKey ?? ""),

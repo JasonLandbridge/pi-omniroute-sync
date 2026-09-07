@@ -46,6 +46,19 @@ export interface ProviderRequestEvent {
 	payload: unknown;
 }
 
+export interface ProviderResponseEvent {
+	status: number;
+	headers: Record<string, string>;
+}
+
+export interface AgentStartEvent {
+	type: "agent_start";
+}
+
+export interface AgentSettledEvent {
+	type: "agent_settled";
+}
+
 export interface OmniContext {
 	hasUI: boolean;
 	mode: "tui" | "rpc" | "json" | "print";
@@ -131,6 +144,9 @@ export interface OmniPI {
 		},
 	): void;
 	on(event: "session_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "agent_start", handler: (event: AgentStartEvent, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "after_provider_response", handler: (event: ProviderResponseEvent, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "agent_settled", handler: (event: AgentSettledEvent, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "before_provider_request", handler: (event: ProviderRequestEvent, ctx: OmniContext) => unknown | Promise<unknown>): void;
 	on(event: "session_shutdown", handler: () => void): void;
 	on(

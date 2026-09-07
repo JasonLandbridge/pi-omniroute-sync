@@ -100,6 +100,7 @@ async function showConfigDialog(
 				`Only usable models: ${settings.onlyShowUsableModels ? "yes" : "no"}`,
 				`Global routing models: ${settings.showGlobalRoutingModels ? "shown" : "hidden"}`,
 				`Auto-sync interval: ${settings.autoSyncIntervalSeconds === 0 ? "off" : `${settings.autoSyncIntervalSeconds} seconds`}`,
+				`Gateway tok/s: ${settings.showGatewayTokensPerSecond ? "shown" : "hidden"}`,
 				`API key: ${config.apiKey ? "configured" : "not configured"}`,
 			].join("\n"),
 			"info",
@@ -229,7 +230,11 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	}
 
 	reloadOmniProvider(pi, agentHome, config);
-	registerGatewayTelemetry(pi as never);
+	registerGatewayTelemetry(pi, {
+		providerName: () => config.providerName,
+		serverUrl: () => config.serverUrl,
+		showTokensPerSecond: () => loadSettings(agentHome).showGatewayTokensPerSecond,
+	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;

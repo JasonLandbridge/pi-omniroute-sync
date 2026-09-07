@@ -100,7 +100,7 @@ You can rerun `/omni setup` whenever the server URL or API key changes. Pressing
 | `/omni models <search>` | Lists models whose ID or display name contains the search text. |
 | `/omni test <model-id>` | Sends a small non-streaming request through the configured inference API (`/v1/responses` in Pi or `/v1/chat/completions` in OMP) and displays the result. |
 | `/omni dashboard` | Displays the configured OmniRoute base URL. `/omni dash` is also accepted. |
-| `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval. |
+| `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval and gateway tok/s display toggle. |
 | `/omni autosync [status\|on\|off\|<seconds>]` | Shows or changes the background catalog refresh interval in seconds. `0`/`off` disables it; the default is 300 seconds (5 minutes). |
 | `/omni help` | Displays the built-in command summary. |
 
@@ -136,6 +136,7 @@ Default settings:
   "syncOnStartup": true,
   "modelCacheTtlMinutes": 60,
   "autoSyncIntervalSeconds": 300,
+  "showGatewayTokensPerSecond": false,
   "lastSuccessfulSyncAt": 0,
   "apiKey": ""
 }
@@ -154,6 +155,7 @@ Default settings:
 | `syncOnStartup` | boolean | `true` | Performs at most one model synchronization during session startup when the cache is stale. |
 | `modelCacheTtlMinutes` | number | `60` | Number of minutes before the last successful sync is stale. Must be non-negative; `0` means always stale. |
 | `autoSyncIntervalSeconds` | number | `300` | Background catalog refresh interval in seconds while a session is running. Configure it in `/omni config` or `/omni autosync`; `0` disables autosync. |
+| `showGatewayTokensPerSecond` | boolean | `false` | Displays gateway-reported tok/s after OmniRoute turns when enabled. Configure it in `/omni config`; disabling it does not affect inference requests. |
 | `lastSuccessfulSyncAt` | number | `0` | Unix timestamp in milliseconds maintained automatically after successful syncs. `0` means no successful sync has been recorded. |
 | `apiKey` | string | empty | Bearer token sent to OmniRoute. Stored only in the protected extension settings file. |
 
@@ -259,6 +261,12 @@ OmniRoute prices are interpreted directly as USD per million tokens and mapped t
 Missing values default to `0`. Every model receives complete cost metadata, including `tiers: []`, so Pi can safely consume both newly synchronized and older persisted model records.
 
 A failure to fetch or parse `/api/pricing` falls back to zero-cost metadata; it does not abort synchronization or replace the existing provider with an incomplete result.
+
+## Gateway Telemetry
+
+When an OmniRoute-backed agent turn settles, the extension displays the gateway-reported generation speed as `tok/s N.N`. It reads `X-OmniRoute-Tokens-Per-Second` and the final stream metadata or usage field, including streamed SSE responses. If OmniRoute does not provide a value, it displays `tok/s —`.
+
+The extension never derives tok/s from token counts and `X-OmniRoute-Latency-Ms`; latency includes time that is not generation. Telemetry is scoped to OmniRoute inference requests and is not shown for other providers. The display is disabled by default and can be enabled with **Show gateway tok/s** in `/omni config`.
 
 ## Catalog Metadata
 

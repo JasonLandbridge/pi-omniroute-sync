@@ -115,7 +115,7 @@ export class ConfigDialog implements OmniComponent {
 		if (this.matchesKey(data, "ctrl+c")) return this.done(undefined);
 		if (this.matchesKey(data, "escape")) return this.done({ ...this.draft });
 		if (this.matchesKey(data, "space")) {
-			if (this.tab === "config" && [2, 3, 6].includes(this.selected)) this.toggleSelectedBoolean();
+			if (this.tab === "config" && [2, 3, 6, 9].includes(this.selected)) this.toggleSelectedBoolean();
 			return;
 		}
 		if (this.matchesKey(data, "left") || this.matchesKey(data, "shift+tab") || this.matchesKey(data, "[")) return this.switchTab("summary");
@@ -196,20 +196,20 @@ export class ConfigDialog implements OmniComponent {
 	}
 
 	private move(delta: number): void {
-		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 11) - 1, this.selected + delta));
+		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 12) - 1, this.selected + delta));
 		this.status = this.rowDescription();
 	}
 
 	private activate(): void {
 		if (this.tab === "summary") return this.sync();
 		if (this.selected === 0) return this.startEditing("serverUrl", this.draft.serverUrl);
-		if ([2, 3, 6].includes(this.selected)) return this.toggleSelectedBoolean();
+		if ([2, 3, 6, 9].includes(this.selected)) return this.toggleSelectedBoolean();
 		if (this.selected === 4) return this.startEditing("includeModels", this.draft.includeModels.join(", "));
 		if (this.selected === 5) return this.startEditing("excludeModels", this.draft.excludeModels.join(", "));
 		if (this.selected === 7) return this.startEditing("modelCacheTtlMinutes", String(this.draft.modelCacheTtlMinutes));
 		if (this.selected === 8) return this.startEditing("autoSyncIntervalSeconds", String(this.draft.autoSyncIntervalSeconds));
-		if (this.selected === 9) return this.startEditing("apiKey", "");
-		if (this.selected === 10) {
+		if (this.selected === 10) return this.startEditing("apiKey", "");
+		if (this.selected === 11) {
 			this.draft.apiKey = "";
 			this.status = "API key cleared in draft. Escape saves and closes.";
 		}
@@ -234,8 +234,13 @@ export class ConfigDialog implements OmniComponent {
 			this.status = `Global routing models ${this.draft.showGlobalRoutingModels ? "shown" : "hidden"} in draft. Escape saves and closes.`;
 			return;
 		}
-		this.draft.syncOnStartup = !this.draft.syncOnStartup;
-		this.status = `Stale startup sync ${this.draft.syncOnStartup ? "enabled" : "disabled"} in draft. Escape saves and closes.`;
+		if (this.selected === 6) {
+			this.draft.syncOnStartup = !this.draft.syncOnStartup;
+			this.status = `Stale startup sync ${this.draft.syncOnStartup ? "enabled" : "disabled"} in draft. Escape saves and closes.`;
+			return;
+		}
+		this.draft.showGatewayTokensPerSecond = !this.draft.showGatewayTokensPerSecond;
+		this.status = `Gateway tok/s display ${this.draft.showGatewayTokensPerSecond ? "enabled" : "disabled"} in draft. Escape saves and closes.`;
 	}
 
 	private sync(): void {
@@ -294,9 +299,12 @@ export class ConfigDialog implements OmniComponent {
 			this.row(7, "Model cache TTL", `${this.draft.modelCacheTtlMinutes} minutes`),
 			this.row(8, "Auto-sync interval", this.draft.autoSyncIntervalSeconds === 0 ? "off" : `${this.draft.autoSyncIntervalSeconds} seconds`),
 			"",
+			this.theme.bold("Gateway telemetry"),
+			this.row(9, "Show gateway tok/s", this.draft.showGatewayTokensPerSecond ? "on" : "off", true),
+			"",
 			this.theme.bold("Credentials"),
-			this.row(9, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
-			this.row(10, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
+			this.row(10, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
+			this.row(11, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
 		];
 	}
 
@@ -324,6 +332,7 @@ export class ConfigDialog implements OmniComponent {
 			"Sync once on startup when the cache is stale.",
 			"Minutes before startup considers the model cache stale; zero means always.",
 			"Seconds between background catalog refreshes; zero disables autosync.",
+			"Show or hide gateway-reported tok/s after OmniRoute turns.",
 			"Replace the API key in a masked inline editor.",
 			"Clear the API key in the draft.",
 		][this.selected] ?? "";
@@ -332,7 +341,7 @@ export class ConfigDialog implements OmniComponent {
 	private footerHelp(): string {
 		if (this.editing) return "type to edit · enter commit field · esc cancel field · ctrl+c cancel all";
 		if (this.tab === "summary") return "←/→ tabs · ↑/↓ move · enter/s sync · esc save & close · ctrl+c cancel";
-		return [2, 3, 6].includes(this.selected)
+		return [2, 3, 6, 9].includes(this.selected)
 			? "↑/↓ move · space/enter toggle draft · esc save & close · ctrl+c cancel"
 			: "↑/↓ move · enter edit · esc save & close · ctrl+c cancel";
 	}
