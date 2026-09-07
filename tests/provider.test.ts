@@ -102,7 +102,7 @@ it("persists a keyless OMP marker without leaking the API key", async () => {
 		{ registerProvider } as never,
 		agentHome,
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 
 	const persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
@@ -225,7 +225,7 @@ it("maps vision capabilities, limits, and pricing from the catalog", async () =>
 	const { discoverModels } = await import("../src/provider.ts");
 	const models = await discoverModels(
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 	const vision = models.find((model) => model.id === "openai/gpt-vision");
 	expect(vision?.input).toEqual(["text", "image"]);
@@ -257,7 +257,7 @@ it("normalizes every visual capability into text and image inputs", async () => 
 	const { discoverModels } = await import("../src/provider.ts");
 	const models = await discoverModels(
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 
 	for (const id of ["image-only", "attachment-capability", "pdf-capability", "video-capability"]) {
@@ -277,7 +277,7 @@ it("keeps advertised models when usable-provider verification fails", async () =
 	const { discoverModels } = await import("../src/provider.ts");
 	const models = await discoverModels(
 		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: true, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ onlyShowUsableModels: true, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 	const model = models.find((entry) => entry.id === "openai/gpt-5");
 	expect(model).toBeDefined();

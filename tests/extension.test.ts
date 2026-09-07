@@ -32,6 +32,7 @@ const baseSettings: OmniSettings = {
 	syncOnStartup: false,
 	modelCacheTtlMinutes: 60,
 	autoSyncIntervalSeconds: 60,
+	showGatewayTokensPerSecond: true,
 	lastSuccessfulSyncAt: 0,
 	apiKey: "",
 };
@@ -179,7 +180,12 @@ describe("autosync lifecycle", () => {
 		const ui = context({
 			custom: vi.fn(async (factory: any): Promise<any> => {
 				let result: OmniSettings | undefined;
-				const component = await factory({ requestRender: vi.fn() }, { fg: (_color, text) => text, bold: (text) => text }, {}, (value) => { result = value; });
+				const component = await factory(
+					{ requestRender: vi.fn() },
+					{ fg: (_color: unknown, text: string) => text, bold: (text: string) => text },
+					{},
+					(value: OmniSettings | undefined) => { result = value; },
+				);
 				component.handleInput("\t");
 				for (let index = 0; index < 8; index++) component.handleInput("j");
 				component.handleInput("\r");

@@ -14,6 +14,7 @@ import {
 import { ConfigDialog, summarizeModels, type ModelSummary } from "./config-dialog.ts";
 import type { AgentHomeOptions, OmniContext, OmniPI, ProviderModelConfig } from "./contracts.ts";
 import { AUTO_MODELS, checkHealth, checkModelsEndpoint, discoverModels, isSyncStale, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
+import { registerGatewayTelemetry } from "./gateway-telemetry.ts";
 
 function sortKey(id: string): string {
 	const autoIndex = AUTO_MODELS.indexOf(id);
@@ -99,6 +100,7 @@ async function showConfigDialog(
 				`Only usable models: ${settings.onlyShowUsableModels ? "yes" : "no"}`,
 				`Global routing models: ${settings.showGlobalRoutingModels ? "shown" : "hidden"}`,
 				`Auto-sync interval: ${settings.autoSyncIntervalSeconds === 0 ? "off" : `${settings.autoSyncIntervalSeconds} seconds`}`,
+				`Gateway tok/s: ${settings.showGatewayTokensPerSecond ? "shown" : "hidden"}`,
 				`API key: ${config.apiKey ? "configured" : "not configured"}`,
 			].join("\n"),
 			"info",
@@ -228,6 +230,11 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	}
 
 	reloadOmniProvider(pi, agentHome, config);
+	registerGatewayTelemetry(pi, {
+		providerName: () => config.providerName,
+		serverUrl: () => config.serverUrl,
+		showTokensPerSecond: () => loadSettings(agentHome).showGatewayTokensPerSecond,
+	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;
