@@ -8,6 +8,7 @@ import type { OmniContext, OmniPI } from "../src/contracts.ts";
 const providerMocks = vi.hoisted(() => ({
 	AUTO_MODELS: ["auto"],
 	checkHealth: vi.fn().mockResolvedValue(true),
+	probeHealth: vi.fn().mockResolvedValue({ ok: true, unreachable: false }),
 	checkModelsEndpoint: vi.fn().mockResolvedValue(true),
 	discoverModels: vi.fn().mockResolvedValue([]),
 	isSyncStale: vi.fn().mockReturnValue(false),
@@ -34,6 +35,8 @@ const baseSettings: OmniSettings = {
 	autoSyncIntervalSeconds: 60,
 	showGatewayTokensPerSecond: true,
 	lastSuccessfulSyncAt: 0,
+	onUnreachable: "none",
+	fallbackModel: "",
 	apiKey: "",
 };
 
@@ -107,6 +110,7 @@ async function createExtension(home: string, pi = fakePi()): Promise<FakePi> {
 beforeEach(() => {
 	vi.useFakeTimers();
 	providerMocks.checkHealth.mockResolvedValue(true);
+	providerMocks.probeHealth.mockResolvedValue({ ok: true, unreachable: false });
 	providerMocks.checkModelsEndpoint.mockResolvedValue(true);
 	providerMocks.isSyncStale.mockReturnValue(false);
 	providerMocks.registerOmniProvider.mockReset().mockResolvedValue([]);
@@ -271,10 +275,10 @@ describe("provider request compatibility hook", () => {
 });
 
 describe("unreachable fallback lifecycle", () => {
-	it("switches before the next prompt when the configured server is unreachable", async () => {
+	it("switches before the next turn when the configured server is unreachable", async () => {
 		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
 		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
-		providerMocks.checkHealth.mockResolvedValue(false);
+		providerMocks.probeHealth.mockResolvedValue({ ok: false, unreachable: true });
 		const pi = await createExtension(home);
 		pi.setModel = vi.fn().mockResolvedValue(true);
 		const fallback = { provider: "anthropic", id: "claude-sonnet-4" };
@@ -324,7 +328,7 @@ describe("unreachable fallback lifecycle", () => {
 		await pi.events.get("after_provider_response")!({ status: 503, headers: {} }, ctx);
 		expect(pi.setModel).not.toHaveBeenCalled();
 		await pi.events.get("agent_end")!({
-			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "503: bad gateway" }],
+			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "gateway request failed" }],
 		}, ctx);
 		await pi.events.get("agent_settled")!({}, ctx);
 
@@ -340,12 +344,24 @@ describe("unreachable fallback lifecycle", () => {
 
 		await pi.events.get("agent_end")!({
 			messages: [{ role: "assistant", provider: "omni", stopReason: "error", errorMessage: "Connection error." }],
-			willContinue: true,
 		}, ctx);
 		await pi.events.get("agent_end")!({
 			messages: [{ role: "assistant", provider: "omni", stopReason: "stop" }],
 		}, ctx);
 		await pi.events.get("agent_settled")!({}, ctx);
+
+		expect(pi.setModel).not.toHaveBeenCalled();
+	});
+
+	it("does not hop for a reachable but unhealthy gateway", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, onUnreachable: "host-fallback", fallbackModel: "anthropic/claude-sonnet-4" });
+		providerMocks.probeHealth.mockResolvedValue({ ok: false, unreachable: false });
+		const pi = await createExtension(home);
+		pi.setModel = vi.fn().mockResolvedValue(true);
+		const ctx = { ...context(), model: { provider: "omni", id: "auto" } };
+
+		await pi.events.get("turn_start")!({}, ctx);
 
 		expect(pi.setModel).not.toHaveBeenCalled();
 	});

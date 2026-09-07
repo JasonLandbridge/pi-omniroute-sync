@@ -44,10 +44,6 @@ describe("shouldAttemptHop", () => {
 		expect(shouldAttemptHop({ ...hopBase, currentProvider: "anthropic", currentModelId: "claude-sonnet-4" })).toBe(false);
 	});
 
-	it("does not hop when already on the fallback model", () => {
-		expect(shouldAttemptHop({ ...hopBase, currentProvider: "anthropic", currentModelId: "claude-sonnet-4" })).toBe(false);
-	});
-
 	it("requires a parseable fallback model", () => {
 		expect(shouldAttemptHop({ ...hopBase, fallbackModel: "" })).toBe(false);
 	});
@@ -94,7 +90,7 @@ describe("hopOnUnreachable", () => {
 		const setModel = vi.fn(async () => true);
 		const notify = vi.fn();
 		const hopped = await hopOnUnreachable(
-			{ serverUrl: "http://localhost:20128", reason: "probe" },
+			{ serverUrl: "http://localhost:20128" },
 			{
 				...hopBase,
 				findModel: (provider, id) => (provider === fallback.provider && id === fallback.id ? fallback : undefined),
@@ -127,7 +123,7 @@ describe("hopOnUnreachable", () => {
 		} as OmniContext;
 
 		expect(await hopOnUnreachable(
-			{ serverUrl: "http://localhost:20128", reason: "probe" },
+			{ serverUrl: "http://localhost:20128" },
 			hopOptionsFromContext(context, hopBase, setModel),
 		)).toBe(true);
 		expect(setModel).toHaveBeenCalledWith(fallback);
@@ -136,7 +132,7 @@ describe("hopOnUnreachable", () => {
 	it("notifies instead of silently doing nothing when the fallback is empty", async () => {
 		const notify = vi.fn();
 		const hopped = await hopOnUnreachable(
-			{ serverUrl: "http://gateway.example", reason: "probe" },
+			{ serverUrl: "http://gateway.example" },
 			{ ...hopBase, fallbackModel: "", notify },
 		);
 		expect(hopped).toBe(false);
@@ -149,7 +145,7 @@ describe("hopOnUnreachable", () => {
 	it("does not invent a second omni provider when the host cannot switch", async () => {
 		const notify = vi.fn();
 		const hopped = await hopOnUnreachable(
-			{ serverUrl: "http://gateway.example", reason: "request-failure", status: 504 },
+			{ serverUrl: "http://gateway.example" },
 			{ ...hopBase, notify },
 		);
 		expect(hopped).toBe(false);
@@ -163,11 +159,26 @@ describe("hopOnUnreachable", () => {
 		const setModel = vi.fn(async () => true);
 		expect(
 			await hopOnUnreachable(
-				{ serverUrl: "http://localhost:20128", reason: "probe" },
+				{ serverUrl: "http://localhost:20128" },
 				{ ...hopBase, onUnreachable: "none", setModel },
 			),
 		).toBe(false);
 		expect(setModel).not.toHaveBeenCalled();
+	});
+
+	it("notifies when the host model switch throws", async () => {
+		const notify = vi.fn();
+		const setModel = vi.fn().mockRejectedValue(new Error("model switch failed"));
+		const hopped = await hopOnUnreachable(
+			{ serverUrl: "http://gateway.example" },
+			{ ...hopBase, findModel: () => ({ provider: "anthropic", id: "claude-sonnet-4" }), setModel, notify },
+		);
+
+		expect(hopped).toBe(false);
+		expect(notify).toHaveBeenCalledWith(
+			"OmniRoute unreachable at http://gateway.example. Host fallback anthropic/claude-sonnet-4 is not authenticated.",
+			"error",
+		);
 	});
 });
 
@@ -177,13 +188,27 @@ describe("createUnreachableController", () => {
 		const controller = createUnreachableController();
 		const config = { serverUrl: "http://configured.example", apiKey: "", providerName: "omni" };
 		const [first, second] = await Promise.all([controller.probe(config), controller.probe(config)]);
-		expect(first).toBe(true);
-		expect(second).toBe(true);
+		expect(first).toEqual({ ok: true, unreachable: false });
+		expect(second).toEqual({ ok: true, unreachable: false });
 		expect(fetchStub).toHaveBeenCalledTimes(1);
 		expect(fetchStub).toHaveBeenCalledWith(
 			"http://configured.example/api/health/ping",
 			expect.objectContaining({}),
 		);
+		fetchStub.mockRestore();
+	});
+
+	it("forces a fresh probe when the success cache is warm", async () => {
+		const fetchStub = vi.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(new Response(null, { status: 200 }))
+			.mockResolvedValueOnce(new Response(null, { status: 200 }));
+		const controller = createUnreachableController();
+		const config = { serverUrl: "http://configured.example", apiKey: "", providerName: "omni" };
+
+		await controller.probe(config);
+		await controller.probe(config, undefined, true);
+
+		expect(fetchStub).toHaveBeenCalledTimes(2);
 		fetchStub.mockRestore();
 	});
 });

@@ -315,7 +315,7 @@ Environment values take precedence when the extension loads runtime configuratio
 
 Catalog sync and the footer health status do not switch the active model by themselves. When OmniRoute is down or timing out, the next send still goes to `omni` unless you hop.
 
-This package does **not** register a second OmniRoute provider. Model switching stays:
+This package does **not** register a second OmniRoute provider. The Pi and OMP adapters use the host model registry and `setModel` API; manual switching stays:
 
 ```text
 /model <model-id>
@@ -332,14 +332,12 @@ Optional settings automate that host switch:
 
 Behavior:
 
-1. Before a send (`before_agent_start`), probe the configured `serverUrl` with `/api/health/ping`.
-2. For HTTP 408/5xx responses, or an OmniRoute assistant error that reports a connect/timeout failure, treat the gateway as unreachable.
+1. Before the first request (`before_agent_start`) and each subsequent inference turn (`turn_start`), probe the configured `serverUrl` with `/api/health/ping`.
+2. Connect failures, timeouts, and HTTP 408/5xx responses are unreachable. Other HTTP responses (for example, 401 or 429) indicate a reachable gateway and do not trigger a host hop.
 3. After the failed turn settles, if the active model is still `omni` and `onUnreachable` is `host-fallback`, call the host `setModel` API for `fallbackModel`.
 4. If the host provider is not authenticated, the extension notifies and leaves the current model unchanged. Use `/model anthropic/claude-sonnet-4` (or another already-logged-in host model) manually.
 
 `onUnreachable: "none"` (the default) keeps today's status-only behavior. In `/omni config`, toggle **On unreachable** between `none` and `host-fallback`, then edit **Fallback model**. Leave the model empty to receive a warning without switching. The fallback must be a different host provider; `omni/...` is ignored.
-
-The community plugin `md-riaz/omniroute-agent-extension` has the same catalog-sync plus health-status shape and also does not hop. Enable only one OmniRoute extension at a time.
 
 For normal startup synchronization and complete configuration management, run `/omni setup` once so the extension-owned settings file exists. You can then keep secrets in environment variables if preferred.
 
@@ -375,6 +373,7 @@ Checks server reachability and reports:
 - Whether the extension settings file exists.
 - The server URL.
 - The registered provider name.
+- The effective `onUnreachable` action and `fallbackModel`.
 
 ### `omniroute_sync`
 

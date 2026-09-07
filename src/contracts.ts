@@ -70,7 +70,10 @@ export interface AgentEndMessage {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: AgentEndMessage[];
-	willContinue?: boolean;
+}
+
+export interface OmniModelRegistry {
+	find(provider: string, id: string): unknown;
 }
 
 export interface OmniContext {
@@ -79,7 +82,7 @@ export interface OmniContext {
 	model?: OmniRequestModel;
 	signal?: AbortSignal;
 	ui: OmniUI;
-	modelRegistry?: { find(provider: string, id: string): unknown };
+	modelRegistry?: OmniModelRegistry;
 }
 
 export type ProviderApi = "openai-completions" | "openai-responses";
@@ -160,6 +163,7 @@ export interface OmniPI {
 	): void;
 	on(event: "session_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "agent_start", handler: (event: AgentStartEvent, ctx: OmniContext) => void | Promise<void>): void;
+	on(event: "turn_start", handler: (event: unknown, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "agent_end", handler: (event: AgentEndEvent, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "after_provider_response", handler: (event: ProviderResponseEvent, ctx: OmniContext) => void | Promise<void>): void;
 	on(event: "agent_settled", handler: (event: AgentSettledEvent, ctx: OmniContext) => void | Promise<void>): void;

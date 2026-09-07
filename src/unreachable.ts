@@ -1,4 +1,4 @@
-import { checkHealth } from "./provider.ts";
+import { probeHealth, type HealthProbeResult } from "./provider.ts";
 import type { OmniConfig, OnUnreachable } from "./config.ts";
 import type { AgentEndMessage, OmniContext } from "./contracts.ts";
 
@@ -11,8 +11,6 @@ export interface HostModelRef {
 
 export interface UnreachableEvent {
 	serverUrl: string;
-	reason: "probe" | "request-failure";
-	status?: number;
 }
 
 export interface UnreachableHopOptions {
@@ -89,7 +87,12 @@ export async function hopOnUnreachable(event: UnreachableEvent, options: Unreach
 		return false;
 	}
 
-	const success = await options.setModel(model);
+	let success: boolean;
+	try {
+		success = await options.setModel(model);
+	} catch {
+		success = false;
+	}
 	if (!success) {
 		options.notify?.(
 			`OmniRoute unreachable at ${event.serverUrl}. Host fallback ${target.provider}/${target.id} is not authenticated.`,
@@ -105,33 +108,41 @@ export async function hopOnUnreachable(event: UnreachableEvent, options: Unreach
 	return true;
 }
 
+/** Coalesce compatible probes without allowing an older request to repopulate the success cache. */
 export function createUnreachableController(): {
-	probe(config: OmniConfig, signal?: AbortSignal): Promise<boolean>;
+	probe(config: OmniConfig, signal?: AbortSignal, force?: boolean): Promise<HealthProbeResult>;
 	reset(): void;
 } {
 	let lastSuccess: { url: string; at: number } | undefined;
-	let inFlight: Promise<boolean> | undefined;
+	let inFlight: { url: string; signal?: AbortSignal; promise: Promise<HealthProbeResult> } | undefined;
+	let generation = 0;
+	let requestId = 0;
 
 	return {
-		async probe(config, signal) {
-			if (lastSuccess && lastSuccess.url === config.serverUrl && Date.now() - lastSuccess.at < SUCCESS_PROBE_CACHE_MS) {
-				return true;
+		async probe(config, signal, force = false) {
+			if (inFlight?.url === config.serverUrl && inFlight.signal === signal) return inFlight.promise;
+			if (!force && lastSuccess && lastSuccess.url === config.serverUrl && Date.now() - lastSuccess.at < SUCCESS_PROBE_CACHE_MS) {
+				return { ok: true, unreachable: false };
 			}
-			if (inFlight) return inFlight;
-			inFlight = checkHealth(config, signal)
-				.then((ok) => {
-					if (ok) lastSuccess = { url: config.serverUrl, at: Date.now() };
-					else lastSuccess = undefined;
-					return ok;
+
+			const startedAt = generation;
+			const startedRequest = ++requestId;
+			const promise = probeHealth(config, signal)
+				.then((result) => {
+					if (result.ok && generation === startedAt && requestId === startedRequest) lastSuccess = { url: config.serverUrl, at: Date.now() };
+					else if (!result.ok) lastSuccess = undefined;
+					return result;
 				})
 				.finally(() => {
-					inFlight = undefined;
+					if (inFlight?.promise === promise) inFlight = undefined;
 				});
-			return inFlight;
+			inFlight = { url: config.serverUrl, signal, promise };
+			return promise;
 		},
 		reset() {
 			lastSuccess = undefined;
-			inFlight = undefined;
+			generation += 1;
+			requestId += 1;
 		},
 	};
 }
