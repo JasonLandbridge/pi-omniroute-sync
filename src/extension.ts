@@ -15,7 +15,9 @@ import {
 } from "./config.ts";
 import { ConfigDialog, summarizeModels, type ModelSummary } from "./config-dialog.ts";
 import type { AgentHomeOptions, OmniContext, OmniPI, ProviderModelConfig } from "./contracts.ts";
-import { AUTO_MODELS, checkModelsEndpoint, discoverModels, isSyncStale, probeHealth, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
+import { AUTO_MODELS, checkModelsEndpoint, discoverModels, isSyncStale, probeHealth, probeManagementScope, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
+import { formatCostsReport, loadCostsReport, COST_RANGES, type CostRange } from "./costs.ts";
+import { formatUsageReport, loadUsageReport } from "./usage.ts";
 import { registerGatewayTelemetry } from "./gateway-telemetry.ts";
 import {
 	createUnreachableController,
@@ -87,6 +89,8 @@ function helpText(): string {
 		"/omni setup            Configure server URL and API key",
 		"/omni sync             Sync models to Ctrl+P / /model picker",
 		"/omni models [search]  Browse models",
+		"/omni usage            Show remaining credits and quota windows per configured account (Codex 5h/weekly, OpenRouter credits, ...)",
+		"/omni costs [1d|7d|30d|90d|ytd|all]  Show cost and token analytics",
 		"/omni test <model>     Smoke-test the configured OmniRoute inference API",
 		"/omni dashboard        Show OmniRoute dashboard URL",
 		"/omni config           Show config paths and current settings",
@@ -191,7 +195,11 @@ async function runSetup(ctx: OmniContext, pi: OmniPI, agentHome: string): Promis
 
 	const next = sanitizeConfig({ ...current, serverUrl, apiKey: apiKey || storedSettings.apiKey });
 	const runtimeConfig = { ...next, apiKey: process.env.OMNIROUTE_API_KEY ?? next.apiKey };
-	if (!(await checkModelsEndpoint(runtimeConfig, ctx.signal))) {
+	const [reachable, scope] = await Promise.all([
+		checkModelsEndpoint(runtimeConfig, ctx.signal),
+		probeManagementScope(runtimeConfig, ctx.signal),
+	]);
+	if (!reachable) {
 		ctx.ui.notify(`Cannot reach ${next.serverUrl}/v1/models.`, "error");
 		return undefined;
 	}
@@ -199,6 +207,14 @@ async function runSetup(ctx: OmniContext, pi: OmniPI, agentHome: string): Promis
 	saveConfig(agentHome, next, storedSettings);
 	const models = await registerOmniProvider(pi, agentHome, runtimeConfig, loadSettings(agentHome), ctx.signal);
 	ctx.ui.notify(`Saved. Synced ${models.length} model(s).`, "info");
+	if (scope === "inference-only") {
+		ctx.ui.notify(
+			"This API key has no management scope. /omni usage, /omni costs, provider filtering, and pricing stay unavailable until the key is granted manage/admin scope.",
+			"warning",
+		);
+	} else if (scope === "manage") {
+		ctx.ui.notify("Management scope detected: /omni usage, /omni costs, provider filtering, and pricing are available.", "info");
+	}
 	return next;
 }
 
@@ -470,9 +486,9 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	}
 
 	pi.registerCommand("omni", {
-		description: "OmniRoute: /omni [setup|sync|models|test|dashboard|config|autosync|help]",
+		description: "OmniRoute: /omni [setup|sync|models|usage|costs|test|dashboard|config|autosync|help]",
 		getArgumentCompletions(prefix) {
-			return ["setup", "sync", "models", "test", "dashboard", "config", "autosync", "help"]
+			return ["setup", "sync", "models", "usage", "costs", "test", "dashboard", "config", "autosync", "help"]
 				.filter((value) => value.startsWith(prefix))
 				.map((value) => ({ value, label: value }));
 		},
@@ -494,6 +510,18 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 					return;
 				}
 				if (sub === "sync") return void (await sync(ctx));
+				if (sub === "usage") {
+					const report = await loadUsageReport(config, ctx.signal);
+					return ctx.ui.notify(formatUsageReport(report), report.denied ? "warning" : "info");
+				}
+				if (sub === "costs") {
+					const requested = (rest[0] || "1d").toLowerCase();
+					if (!COST_RANGES.includes(requested as CostRange)) {
+						return ctx.ui.notify(`Usage: /omni costs [${COST_RANGES.join("|")}]`, "warning");
+					}
+					const report = await loadCostsReport(config, requested as CostRange, ctx.signal);
+					return ctx.ui.notify(formatCostsReport(report), report.denied ? "warning" : "info");
+				}
 				if (sub === "models") {
 					const models = await discoverModels(config, loadSettings(agentHome), ctx.signal).catch((error) => {
 						if (ctx.signal?.aborted) throw error;

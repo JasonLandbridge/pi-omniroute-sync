@@ -9,6 +9,7 @@ const providerMocks = vi.hoisted(() => ({
 	AUTO_MODELS: ["auto"],
 	checkHealth: vi.fn().mockResolvedValue(true),
 	probeHealth: vi.fn().mockResolvedValue({ ok: true, unreachable: false }),
+	probeManagementScope: vi.fn().mockResolvedValue("manage"),
 	checkModelsEndpoint: vi.fn().mockResolvedValue(true),
 	discoverModels: vi.fn().mockResolvedValue([]),
 	isSyncStale: vi.fn().mockReturnValue(false),
@@ -19,7 +20,20 @@ const providerMocks = vi.hoisted(() => ({
 	transformProviderPayload: vi.fn((payload) => payload),
 }));
 
+const usageMocks = vi.hoisted(() => ({
+	loadUsageReport: vi.fn(),
+	formatUsageReport: vi.fn(() => "usage report"),
+}));
+
+const costsMocks = vi.hoisted(() => ({
+	COST_RANGES: ["1d", "7d", "30d", "90d", "ytd", "all"],
+	loadCostsReport: vi.fn(),
+	formatCostsReport: vi.fn(() => "costs report"),
+}));
+
 vi.mock("../src/provider.ts", () => providerMocks);
+vi.mock("../src/usage.ts", () => usageMocks);
+vi.mock("../src/costs.ts", () => costsMocks);
 
 import { createOmniExtension } from "../src/extension.ts";
 
@@ -112,17 +126,108 @@ beforeEach(() => {
 	vi.useFakeTimers();
 	providerMocks.checkHealth.mockResolvedValue(true);
 	providerMocks.probeHealth.mockResolvedValue({ ok: true, unreachable: false });
-	providerMocks.checkModelsEndpoint.mockResolvedValue(true);
+	providerMocks.probeManagementScope.mockReset().mockResolvedValue("manage");
+	providerMocks.checkModelsEndpoint.mockReset().mockResolvedValue(true);
 	providerMocks.isSyncStale.mockReturnValue(false);
 	providerMocks.registerOmniProvider.mockReset().mockResolvedValue([]);
 	providerMocks.reloadOmniProvider.mockClear();
 	providerMocks.setInferenceApi.mockClear();
 	providerMocks.transformProviderPayload.mockClear();
+	usageMocks.loadUsageReport.mockReset().mockResolvedValue({ entries: [], intervalMinutes: 70, lastAutoSyncAt: null, denied: false, errors: [] });
+	usageMocks.formatUsageReport.mockClear().mockReturnValue("usage report");
+	costsMocks.loadCostsReport.mockReset().mockResolvedValue({ range: "1d", summary: undefined, quota: [], denied: false, errors: [] });
+	costsMocks.formatCostsReport.mockClear().mockReturnValue("costs report");
 });
 
 afterEach(() => {
 	vi.useRealTimers();
 	vi.unstubAllEnvs();
+});
+
+describe("usage command and key scope", () => {
+	it("reports inference-only keys after setup", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		providerMocks.probeManagementScope.mockResolvedValueOnce("inference-only");
+		const pi = await createExtension(home);
+		const ui = context({ input: vi.fn().mockResolvedValueOnce(baseSettings.serverUrl).mockResolvedValueOnce("") });
+
+		await pi.commands.get("omni")!.handler("setup", ui);
+
+		expect(ui.ui.notify).toHaveBeenCalledWith(expect.stringContaining("management scope"), "warning");
+	});
+
+	it("confirms management scope after setup", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		const pi = await createExtension(home);
+		const ui = context({ input: vi.fn().mockResolvedValueOnce(baseSettings.serverUrl).mockResolvedValueOnce("") });
+
+		await pi.commands.get("omni")!.handler("setup", ui);
+
+		expect(ui.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Management scope detected"), "info");
+	});
+
+	it("renders the usage report for configured accounts", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+
+		await pi.commands.get("omni")!.handler("usage", ui);
+
+		expect(usageMocks.loadUsageReport).toHaveBeenCalledWith(expect.objectContaining({ serverUrl: baseSettings.serverUrl }), ui.signal);
+		expect(ui.ui.notify).toHaveBeenCalledWith("usage report", "info");
+	});
+
+	it("shows management-denied usage reports as warnings", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		usageMocks.loadUsageReport.mockResolvedValueOnce({ entries: [], intervalMinutes: 70, lastAutoSyncAt: null, denied: true, errors: [] });
+		const ui = context();
+
+		await pi.commands.get("omni")!.handler("usage", ui);
+
+		expect(ui.ui.notify).toHaveBeenCalledWith("usage report", "warning");
+	});
+
+	it("renders the costs report for the requested range", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+
+		await pi.commands.get("omni")!.handler("costs 7d", ui);
+
+		expect(costsMocks.loadCostsReport).toHaveBeenCalledWith(expect.objectContaining({ serverUrl: baseSettings.serverUrl }), "7d", ui.signal);
+		expect(ui.ui.notify).toHaveBeenCalledWith("costs report", "info");
+	});
+
+	it("defaults costs to 1d and rejects unknown ranges without fetching", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+
+		await pi.commands.get("omni")!.handler("costs", ui);
+		expect(costsMocks.loadCostsReport).toHaveBeenCalledWith(expect.anything(), "1d", ui.signal);
+
+		costsMocks.loadCostsReport.mockClear();
+		await pi.commands.get("omni")!.handler("costs 2d", ui);
+		expect(costsMocks.loadCostsReport).not.toHaveBeenCalled();
+		expect(ui.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Usage: /omni costs"), "warning");
+	});
+
+	it("shows management-denied costs reports as warnings", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		costsMocks.loadCostsReport.mockResolvedValueOnce({ range: "1d", quota: [], denied: true, errors: [] });
+		const ui = context();
+
+		await pi.commands.get("omni")!.handler("costs", ui);
+
+		expect(ui.ui.notify).toHaveBeenCalledWith("costs report", "warning");
+	});
 });
 
 describe("stale context guards", () => {

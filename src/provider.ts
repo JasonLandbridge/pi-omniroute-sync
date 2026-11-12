@@ -203,6 +203,24 @@ export async function checkModelsEndpoint(config: OmniConfig, signal?: AbortSign
 	}
 }
 
+export type ManagementScope = "manage" | "inference-only" | "unknown";
+
+/** Probe a management endpoint to tell whether the key also carries `manage` scope. */
+export async function probeManagementScope(config: OmniConfig, signal?: AbortSignal): Promise<ManagementScope> {
+	try {
+		const res = await fetch(`${config.serverUrl}/api/providers?limit=1`, {
+			headers: authHeaders(config),
+			signal: requestSignal(5_000, signal),
+		});
+		if (res.ok) return "manage";
+		if (res.status === 401 || res.status === 403) return "inference-only";
+		return "unknown";
+	} catch (error) {
+		if (signal?.aborted) throw error;
+		return "unknown";
+	}
+}
+
 function rawModalities(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
 	return value.map((item) => String(item).trim().toLowerCase()).filter(Boolean);

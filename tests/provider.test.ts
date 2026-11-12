@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, probeHealth, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
+import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, probeHealth, probeManagementScope, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
 import { saveConfig } from "../src/config.ts";
 
 const fetchStub = vi.spyOn(globalThis, "fetch");
@@ -31,6 +31,26 @@ it("treats reachable non-success health responses as unhealthy, not unreachable"
 		ok: false,
 		unreachable: false,
 	});
+});
+
+it("probes management scope from the provider management endpoint", async () => {
+	const config = { serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" };
+
+	fetchStub.mockResolvedValueOnce(new Response(null, { status: 200 }));
+	expect(await probeManagementScope(config)).toBe("manage");
+	expect(fetchStub).toHaveBeenCalledWith(
+		"http://localhost:20128/api/providers?limit=1",
+		expect.objectContaining({ headers: { Authorization: "Bearer secret" } }),
+	);
+
+	fetchStub.mockResolvedValueOnce(new Response(null, { status: 403 }));
+	expect(await probeManagementScope(config)).toBe("inference-only");
+
+	fetchStub.mockResolvedValueOnce(new Response(null, { status: 500 }));
+	expect(await probeManagementScope(config)).toBe("unknown");
+
+	fetchStub.mockRejectedValueOnce(new Error("offline"));
+	expect(await probeManagementScope(config)).toBe("unknown");
 });
 
 it("normalizes legacy persisted models for Responses and cost tiers", () => {

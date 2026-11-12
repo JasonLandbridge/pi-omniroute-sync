@@ -66,6 +66,8 @@ The test suite covers:
 - Autosync lifecycle, interval validation, setup activation, shutdown cleanup, and environment-secret preservation.
 - Gateway telemetry header and final-stream parsing, provider scoping, missing-value handling, stale-value protection, and display-setting toggling.
 - Background timer UI guards (health timer and auto-sync notifications) against stale extension generations after host reloads.
+- Cost analytics (`/omni costs`): analytics/quota parsing, report formatting, partial-data handling, and management-denied keys; setup-time management-scope detection.
+- Usage limits (`/omni usage`): connection/cache joining, Codex 5h/weekly window labels, money balances, unlimited quotas, banked reset credit counts and expiry rendering, stale-cache marking, orphan cache entries, and management-denied keys.
 - Per-turn configured `serverUrl` health probes (not only `OMNIROUTE_URL`), 408/5xx/network failure classification, thrown request-failure detection, final-settle fallback switching, and optional on-unreachable host fallback settings.
 - Config-dialog navigation, staged editing, native key handling, masking, validation, autosync interval editing, save/discard behavior, and in-place synchronization.
 

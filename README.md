@@ -87,7 +87,7 @@ omp install git:github.com/JasonLandbridge/pi-omniroute-sync
 
 6. Select an OmniRoute-backed model and chat normally.
 
-You can rerun `/omni setup` whenever the server URL or API key changes. Pressing Enter at the API-key prompt preserves an existing key.
+You can rerun `/omni setup` whenever the server URL or API key changes. Pressing Enter at the API-key prompt preserves an existing key. Setup also probes the key's management scope: a `manage`-scoped key enables `/omni usage`, strict provider filtering, and pricing; an inference-only key is reported as a warning, and the extension keeps working without those features.
 
 ## Commands
 
@@ -98,6 +98,8 @@ You can rerun `/omni setup` whenever the server URL or API key changes. Pressing
 | `/omni sync` | Performs a strict model discovery, registers the provider, updates `models.json`, and records a successful-sync timestamp. |
 | `/omni models` | Discovers and lists available models grouped by provider prefix. |
 | `/omni models <search>` | Lists models whose ID or display name contains the search text. |
+| `/omni usage` | Shows remaining credits and quota windows (Codex 5h/weekly, OpenRouter credits, provider balances) per configured account, from the gateway's cached Provider Limits data. Requires a management-scoped key. |
+| `/omni costs [1d\|7d\|30d\|90d\|ytd\|all]` | Shows cost, request/token totals, and per-provider quota from OmniRoute's usage analytics. Defaults to `1d`. Requires a management-scoped key. |
 | `/omni test <model-id>` | Sends a small non-streaming request through the configured inference API (`/v1/responses` in Pi or `/v1/chat/completions` in OMP) and displays the result. |
 | `/omni dashboard` | Displays the configured OmniRoute base URL. `/omni dash` is also accepted. |
 | `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval and gateway tok/s display toggle. |
@@ -114,6 +116,45 @@ Examples:
 ```
 
 Autosync runs only while the host session is active. It refreshes the catalog in the background, keeps the last successful catalog when a refresh fails, and stops when the session shuts down. The interval is also editable as **Auto-sync interval** in the `/omni config` dialog; enter seconds, or `0` to disable it.
+
+## Usage and costs
+
+Two on-demand commands read OmniRoute's management endpoints:
+
+### `/omni usage` — remaining credits and quota windows
+
+Shows, for every **configured account/connection**, what is left:
+
+- Per **provider connection**: provider, account name, active/inactive state, and plan (e.g. `plus`, `prolite`, `DeepSeek`, `OpenRouter`).
+- Per **quota window**: remaining percent, used/total, reset time, and `unlimited` balances. Codex windows are labeled `5h window` and `weekly window`.
+- **Banked reset credits**: listed per account when the gateway reports them. Expiry datetimes render automatically when the gateway includes them (`banked resets  2 · expiring 2026-12-01 10:00Z`); OmniRoute currently exposes only the count, so the expiry line appears once upstream reports the datetimes.
+- **Credits/balances**: providers that report a money balance (DeepSeek `credits_usd`, OpenRouter `credits`) render as `$7.71 of $10.00 left (77% left)`.
+- **Account errors**: expired or unauthorized accounts are flagged with the gateway's message (e.g. "Codex token expired or access denied").
+- **Cache age**: each entry shows when the gateway last synced it, and marks it stale when older than twice the auto-sync interval.
+
+The command reads the gateway's cached Provider Limits data (`/api/usage/provider-limits`) plus the connection list (`/api/providers`), so it is fast and does not trigger upstream quota refreshes.
+
+```text
+/omni usage
+```
+
+### `/omni costs` — cost and token analytics
+
+`/omni costs` renders usage analytics for a range:
+
+- requests, success rate, average latency, cost, prompt/completion tokens, and fallbacks;
+- plus the per-provider percentage quota table when the gateway reports limits.
+
+Ranges follow OmniRoute's analytics API: `1d` (default), `7d`, `30d`, `90d`, `ytd`, and `all`.
+
+```text
+/omni costs        # last 24 hours
+/omni costs 7d     # last 7 days
+```
+
+### Management scope
+
+Both commands read management-protected endpoints. The configured API key needs `manage` (or `admin`) scope; inference-only keys get a clear warning and the rest of the extension keeps working. `/omni setup` probes the key's scope and reports it after saving, so you know up front whether usage, costs, pricing, and strict provider filtering are available. Nothing polls in the background — reports are fetched only when you run a command.
 
 
 ## Settings
