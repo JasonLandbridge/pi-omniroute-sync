@@ -18,6 +18,7 @@
 - Optional global `auto` and `auto/*` routing models.
 - Real cost metadata from OmniRoute's pricing API, with zero-cost fallback when pricing is unavailable.
 - Background catalog autosync while a session is running, configurable from `/omni config` or `/omni autosync`.
+- On-demand `/omni usage` for remaining credits and quota windows per configured account (Codex 5h/weekly, OpenRouter/DeepSeek balances, banked resets) and `/omni costs` for cost/token analytics.
 - Secure extension-owned settings; the configured API key is persisted to `models.json` so hosts can authenticate on gateways that require keys (environment-only keys are never copied).
 - Health status, model browsing, and direct model testing commands. Health checks use OmniRoute's lightweight `/api/health/ping` endpoint instead of downloading the full model catalog.
 
@@ -87,7 +88,7 @@ omp install git:github.com/JasonLandbridge/pi-omniroute-sync
 
 6. Select an OmniRoute-backed model and chat normally.
 
-You can rerun `/omni setup` whenever the server URL or API key changes. Pressing Enter at the API-key prompt preserves an existing key. Setup also probes the key's management scope: a `manage`-scoped key enables `/omni usage`, strict provider filtering, and pricing; an inference-only key is reported as a warning, and the extension keeps working without those features.
+You can rerun `/omni setup` whenever the server URL or API key changes. Pressing Enter at the API-key prompt preserves an existing key. Setup also probes the key's management scope: a `manage`-scoped key enables `/omni usage`, `/omni costs`, strict provider filtering, and pricing; an inference-only key is reported as a warning, and the extension keeps working without those features.
 
 ## Commands
 
@@ -102,7 +103,7 @@ You can rerun `/omni setup` whenever the server URL or API key changes. Pressing
 | `/omni costs [1d\|7d\|30d\|90d\|ytd\|all]` | Shows cost, request/token totals, and per-provider quota from OmniRoute's usage analytics. Defaults to `1d`. Requires a management-scoped key. |
 | `/omni test <model-id>` | Sends a small non-streaming request through the configured inference API (`/v1/responses` in Pi or `/v1/chat/completions` in OMP) and displays the result. |
 | `/omni dashboard` | Displays the configured OmniRoute base URL. `/omni dash` is also accepted. |
-| `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval and gateway tok/s display toggle. |
+| `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval, gateway tok/s display, and agent-tools toggles. |
 | `/omni autosync [status\|on\|off\|<seconds>]` | Shows or changes the background catalog refresh interval in seconds. `0`/`off` disables it; the default is 300 seconds (5 minutes). |
 | `/omni help` | Displays the built-in command summary. |
 
