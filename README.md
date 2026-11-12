@@ -100,7 +100,7 @@ You can rerun `/omni setup` whenever the server URL or API key changes. Pressing
 | `/omni models` | Discovers and lists available models grouped by provider prefix. |
 | `/omni models <search>` | Lists models whose ID or display name contains the search text. |
 | `/omni usage` | Shows remaining credits and quota windows (Codex 5h/weekly, OpenRouter credits, provider balances) per configured account, from the gateway's cached Provider Limits data. Requires a management-scoped key. |
-| `/omni costs [1d\|7d\|30d\|90d\|ytd\|all]` | Shows cost, request/token totals, and per-provider quota from OmniRoute's usage analytics. Defaults to `1d`. Requires a management-scoped key. |
+| `/omni costs [1d\|7d\|30d\|90d\|ytd\|all]` | Shows cost, request/token totals, success rate, latency, and fallbacks from OmniRoute's usage analytics. Defaults to `1d`. Requires a management-scoped key. |
 | `/omni test <model-id>` | Sends a small non-streaming request through the configured inference API (`/v1/responses` in Pi or `/v1/chat/completions` in OMP) and displays the result. |
 | `/omni dashboard` | Displays the configured OmniRoute base URL. `/omni dash` is also accepted. |
 | `/omni config` | Opens the Summary and Config overlay in TUI mode, including the autosync interval, gateway tok/s display, and agent-tools toggles. |
@@ -143,8 +143,9 @@ The command reads the gateway's cached Provider Limits data (`/api/usage/provide
 
 `/omni costs` renders usage analytics for a range:
 
-- requests, success rate, average latency, cost, prompt/completion tokens, and fallbacks;
-- plus the per-provider percentage quota table when the gateway reports limits.
+- requests, success rate, average latency, cost, prompt/completion tokens, and fallbacks.
+
+It intentionally does not show remaining limits — `/omni usage` is the authoritative limits view (the analytics quota table reports connection-level placeholders that can contradict real window usage).
 
 Ranges follow OmniRoute's analytics API: `1d` (default), `7d`, `30d`, `90d`, `ytd`, and `all`.
 

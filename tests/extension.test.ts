@@ -138,7 +138,7 @@ beforeEach(() => {
 	providerMocks.transformProviderPayload.mockClear();
 	usageMocks.loadUsageReport.mockReset().mockResolvedValue({ entries: [], intervalMinutes: 70, lastAutoSyncAt: null, denied: false, errors: [] });
 	usageMocks.formatUsageReport.mockClear().mockReturnValue("usage report");
-	costsMocks.loadCostsReport.mockReset().mockResolvedValue({ range: "1d", summary: undefined, quota: [], denied: false, errors: [] });
+	costsMocks.loadCostsReport.mockReset().mockResolvedValue({ range: "1d", summary: undefined, denied: false, errors: [] });
 	costsMocks.formatCostsReport.mockClear().mockReturnValue("costs report");
 });
 
@@ -231,7 +231,7 @@ describe("usage command and key scope", () => {
 		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
 		saveSettings(home, baseSettings);
 		const pi = await createExtension(home);
-		costsMocks.loadCostsReport.mockResolvedValueOnce({ range: "1d", quota: [], denied: true, errors: [] });
+		costsMocks.loadCostsReport.mockResolvedValueOnce({ range: "1d", denied: true, errors: [] });
 		const ui = context();
 
 		await pi.commands.get("omni")!.handler("costs", ui);
