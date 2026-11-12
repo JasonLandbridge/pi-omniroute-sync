@@ -17,6 +17,7 @@ const baseSettings: OmniSettings = {
 	modelCacheTtlMinutes: 60,
 	autoSyncIntervalSeconds: 300,
 	showGatewayTokensPerSecond: true,
+	registerTools: false,
 	lastSuccessfulSyncAt: 0,
 	onUnreachable: "none",
 	fallbackModel: "",
@@ -318,6 +319,17 @@ describe("inline field editing", () => {
 		expect(rendered(component)).toContain("Gateway tok/s display disabled in draft");
 		component.handleInput("\x1b");
 		expect(done).toHaveBeenCalledWith({ ...baseSettings, showGatewayTokensPerSecond: false });
+	});
+
+	it("toggles agent tool registration in the draft", () => {
+		const done = vi.fn();
+		const component = dialog(done);
+		goConfig(component);
+		for (let index = 0; index < 14; index++) component.handleInput("j");
+		component.handleInput(" ");
+		expect(rendered(component)).toContain("Agent tools will be registered");
+		component.handleInput("\x1b");
+		expect(done).toHaveBeenCalledWith({ ...baseSettings, registerTools: true });
 	});
 
 	it("masks API-key editing and stages the replacement", () => {

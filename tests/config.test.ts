@@ -47,6 +47,8 @@ it("normalizes persisted auto-sync values at the settings boundary", () => {
 	expect(sanitizeSettings({ autoSyncIntervalSeconds: "12345" as unknown as number })).toMatchObject({ autoSyncIntervalSeconds: 300 });
 	expect(sanitizeSettings({ autoSyncIntervalMs: 120_000 } as Partial<OmniSettings> & { autoSyncIntervalMs: number })).toMatchObject({ autoSyncIntervalSeconds: 120 });
 	expect(sanitizeSettings({ showGatewayTokensPerSecond: false }).showGatewayTokensPerSecond).toBe(false);
+	expect(sanitizeSettings({ registerTools: true }).registerTools).toBe(true);
+	expect(sanitizeSettings({}).registerTools).toBe(false);
 });
 
 describe("loadSettings", () => {
@@ -66,6 +68,7 @@ describe("loadSettings", () => {
 			modelCacheTtlMinutes: 60,
 			autoSyncIntervalSeconds: 300,
 			showGatewayTokensPerSecond: false,
+			registerTools: false,
 			lastSuccessfulSyncAt: 0,
 			onUnreachable: "none",
 			fallbackModel: "",
@@ -90,6 +93,7 @@ describe("loadSettings", () => {
 			modelCacheTtlMinutes: 60,
 			autoSyncIntervalSeconds: 300,
 			showGatewayTokensPerSecond: false,
+			registerTools: false,
 			lastSuccessfulSyncAt: 0,
 			onUnreachable: "none",
 			fallbackModel: "",
@@ -118,6 +122,7 @@ describe("saveConfig", () => {
 			modelCacheTtlMinutes: 60,
 			autoSyncIntervalSeconds: 300,
 			showGatewayTokensPerSecond: false,
+			registerTools: false,
 			lastSuccessfulSyncAt: 0,
 			onUnreachable: "none",
 			fallbackModel: "",

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, probeHealth, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
+import { saveConfig } from "../src/config.ts";
 
 const fetchStub = vi.spyOn(globalThis, "fetch");
 
@@ -96,7 +97,34 @@ it("rewrites unsupported provider request fields from catalog capabilities", () 
 	expect(transformProviderPayload(payload, { provider: "other" }, "omni")).toBe(payload);
 });
 
-it("persists a keyless OMP marker without leaking the API key", async () => {
+it("persists the configured API key so hosts can authenticate on key-required gateways", async () => {
+	fetchStub.mockImplementation(async (input) => {
+		const url = String(input);
+		const body = url.endsWith("/v1/models")
+			? { data: [{ id: "openai/gpt-5", name: "GPT-5" }] }
+			: { openai: { "gpt-5": { input: 1, output: 2 } } };
+		return new Response(JSON.stringify(body), { status: 200 });
+	});
+
+	const agentHome = mkdtempSync(join(tmpdir(), "pi-omni-provider-"));
+	saveConfig(agentHome, { serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" });
+	const registerProvider = vi.fn();
+	await registerOmniProvider(
+		{ registerProvider } as never,
+		agentHome,
+		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+	);
+
+	const persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
+	expect(persisted.providers.omni.models[0].maxTokens).toBeUndefined();
+	expect(persisted.providers.omni.models[0].omitMaxOutputTokens).toBe(true);
+	expect(persisted.providers.omni.auth).toBe("apiKey");
+	expect(persisted.providers.omni.apiKey).toBe("secret");
+	expect(registerProvider).toHaveBeenCalledWith("omni", expect.objectContaining({ apiKey: "secret" }));
+});
+
+it("keeps the persisted provider keyless when no API key is configured", async () => {
 	fetchStub.mockImplementation(async (input) => {
 		const url = String(input);
 		const body = url.endsWith("/v1/models")
@@ -110,16 +138,39 @@ it("persists a keyless OMP marker without leaking the API key", async () => {
 	await registerOmniProvider(
 		{ registerProvider } as never,
 		agentHome,
-		{ serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" },
-		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
+		{ serverUrl: "http://localhost:20128", apiKey: "", providerName: "omni" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "" },
 	);
 
 	const persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
-	expect(persisted.providers.omni.models[0].maxTokens).toBeUndefined();
-	expect(persisted.providers.omni.models[0].omitMaxOutputTokens).toBe(true);
 	expect(persisted.providers.omni.auth).toBe("none");
 	expect(persisted.providers.omni.apiKey).toBeUndefined();
-	expect(registerProvider).toHaveBeenCalledWith("omni", expect.objectContaining({ apiKey: "secret" }));
+	expect(registerProvider).toHaveBeenCalledWith("omni", expect.objectContaining({ apiKey: "omniroute-public" }));
+});
+
+it("never persists an environment-only API key", async () => {
+	fetchStub.mockImplementation(async (input) => {
+		const url = String(input);
+		const body = url.endsWith("/v1/models")
+			? { data: [{ id: "openai/gpt-5", name: "GPT-5" }] }
+			: { openai: { "gpt-5": { input: 1, output: 2 } } };
+		return new Response(JSON.stringify(body), { status: 200 });
+	});
+
+	const agentHome = mkdtempSync(join(tmpdir(), "pi-omni-provider-"));
+	saveConfig(agentHome, { serverUrl: "http://localhost:20128", apiKey: "", providerName: "omni" });
+	const registerProvider = vi.fn();
+	await registerOmniProvider(
+		{ registerProvider } as never,
+		agentHome,
+		{ serverUrl: "http://localhost:20128", apiKey: "environment-secret", providerName: "omni" },
+		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "environment-secret" },
+	);
+
+	const persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
+	expect(persisted.providers.omni.auth).toBe("none");
+	expect(persisted.providers.omni.apiKey).toBeUndefined();
+	expect(registerProvider).toHaveBeenCalledWith("omni", expect.objectContaining({ apiKey: "environment-secret" }));
 });
 
 it("filters disabled and unusable provider models when enabled-only is active", () => {

@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { modelsJsonPath, saveSettings, type OmniConfig, type OmniSettings } from "./config.ts";
+import { loadConfig, modelsJsonPath, saveSettings, type OmniConfig, type OmniSettings } from "./config.ts";
 import type { OmniPI, OmniRequestModel, OmniThinking, ProviderApi, ProviderCompat, ProviderEntry, ProviderModelConfig, ProviderThinkingLevel, ProviderThinkingLevelMap } from "./contracts.ts";
 
 const DEFAULT_PROVIDER_API: ProviderApi = "openai-responses";
@@ -508,14 +508,26 @@ function persistModels(agentHome: string, config: OmniConfig, models: ProviderMo
 		const { maxTokens: _maxTokens, ...withoutMaxTokens } = model;
 		return withoutMaxTokens as ProviderModelConfig;
 	});
-	file.providers[config.providerName] = {
+	const entry: Partial<ProviderEntry> = {
 		baseUrl: `${config.serverUrl}/v1`,
 		api: providerApi(),
-		auth: "none",
 		authHeader: true,
 		compat: PROVIDER_COMPAT,
 		models: persistedModels,
 	};
+	// Persist the settings-file key so hosts that load the provider from
+	// models.json (OMP's models.yml migration, Pi's model registry) can
+	// authenticate when the gateway requires API keys. Environment-only
+	// keys stay out of the file: loadConfig reads the settings file, never
+	// the OMNIROUTE_API_KEY override.
+	const fileKey = loadConfig(agentHome).apiKey;
+	if (fileKey) {
+		entry.apiKey = fileKey;
+		entry.auth = "apiKey";
+	} else {
+		entry.auth = "none";
+	}
+	file.providers[config.providerName] = entry;
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, JSON.stringify(file, null, 2));
 }

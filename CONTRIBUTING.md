@@ -65,6 +65,7 @@ The test suite covers:
 - Startup synchronization staleness and TTL boundaries.
 - Autosync lifecycle, interval validation, setup activation, shutdown cleanup, and environment-secret preservation.
 - Gateway telemetry header and final-stream parsing, provider scoping, missing-value handling, stale-value protection, and display-setting toggling.
+- Background timer UI guards (health timer and auto-sync notifications) against stale extension generations after host reloads.
 - Per-turn configured `serverUrl` health probes (not only `OMNIROUTE_URL`), 408/5xx/network failure classification, thrown request-failure detection, final-settle fallback switching, and optional on-unreachable host fallback settings.
 - Config-dialog navigation, staged editing, native key handling, masking, validation, autosync interval editing, save/discard behavior, and in-place synchronization.
 
@@ -86,7 +87,7 @@ Do not document separate state files or configuration paths unless the implement
 - Put shared behavior in the narrowest existing module under `src/`.
 - Preserve the normal `/model <model-id>` experience and the single `omni` provider; do not install or enable another OmniRoute extension alongside this package.
 - Use the host's native Responses implementation and TUI input/key handling.
-- Never write the API key to `models.json`.
+- Persist the settings-file API key in the `models.json` provider entry (`apiKey` + `auth: "apiKey"`) so hosts that load the provider from disk can authenticate on key-required gateways; when no key is configured, persist `auth: "none"` (keyless). Never persist keys that come only from environment variables.
 - Keep synchronization transactional: failed discovery must preserve the previous registered and persisted model catalog.
 - Propagate cancellation through network operations and retain bounded timeouts.
 - Prefer targeted changes and tests over new abstractions or dependencies.

@@ -34,6 +34,7 @@ const baseSettings: OmniSettings = {
 	modelCacheTtlMinutes: 60,
 	autoSyncIntervalSeconds: 60,
 	showGatewayTokensPerSecond: true,
+	registerTools: false,
 	lastSuccessfulSyncAt: 0,
 	onUnreachable: "none",
 	fallbackModel: "",
@@ -122,6 +123,63 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 	vi.unstubAllEnvs();
+});
+
+describe("stale context guards", () => {
+	it("guards health timer status updates against stale contexts", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const sessionStart = pi.events.get("session_start")!;
+		const sessionShutdown = pi.events.get("session_shutdown")!;
+		const staleUi = context({
+			setStatus: vi.fn(() => {
+				throw new Error("stale extension generation after reload");
+			}),
+			notify: vi.fn(() => {
+				throw new Error("stale extension generation after reload");
+			}),
+		});
+		await sessionStart({}, staleUi);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(staleUi.ui.setStatus).toHaveBeenCalled();
+		sessionShutdown();
+	});
+
+	it("guards auto-sync failure notifications against stale contexts", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const sessionStart = pi.events.get("session_start")!;
+		const sessionShutdown = pi.events.get("session_shutdown")!;
+		providerMocks.registerOmniProvider.mockRejectedValueOnce(new Error("sync failed"));
+		const staleUi = context({ notify: vi.fn(() => {
+			throw new Error("stale extension generation after reload");
+		}) });
+		await sessionStart({}, staleUi);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(providerMocks.registerOmniProvider).toHaveBeenCalled();
+		expect(staleUi.ui.notify).toHaveBeenCalled();
+		sessionShutdown();
+	});
+});
+
+describe("agent tool registration", () => {
+	it("does not register agent tools by default", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		expect(pi.registerTool).not.toHaveBeenCalled();
+	});
+
+	it("registers both agent tools when registerTools is enabled", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, { ...baseSettings, registerTools: true });
+		const pi = await createExtension(home);
+		expect(pi.registerTool).toHaveBeenCalledTimes(2);
+		expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "omniroute_status" }));
+		expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "omniroute_sync" }));
+	});
 });
 
 describe("autosync lifecycle", () => {
