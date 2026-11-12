@@ -7,6 +7,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	await createOmniExtension(pi as unknown as OmniPI, {
 		homeEnvVar: "OMP_HOME",
 		defaultHome: "~/.omp/agent",
+		host: "omp",
 		inferenceApi: "openai-completions",
 		matchesKey,
 		createInput: (initialValue) => {

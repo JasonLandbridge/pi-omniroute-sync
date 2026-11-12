@@ -4,11 +4,16 @@ import { loadConfig, modelsJsonPath, saveSettings, type OmniConfig, type OmniSet
 import type { OmniPI, OmniRequestModel, OmniThinking, ProviderApi, ProviderCompat, ProviderEntry, ProviderModelConfig, ProviderThinkingLevel, ProviderThinkingLevelMap } from "./contracts.ts";
 
 const DEFAULT_PROVIDER_API: ProviderApi = "openai-responses";
-export const PROVIDER_COMPAT: ProviderCompat = {
-	sessionAffinityFormat: "openrouter",
-	promptCacheSessionHeader: "x-session-id",
-	supportsLongCacheRetention: true,
-};
+type ProviderHost = "pi" | "omp";
+/** Pi understands `sessionAffinityFormat`; omp reports it as an unknown compat key. */
+export function providerCompat(host: ProviderHost = activeHost): ProviderCompat {
+	return {
+		...(host === "pi" ? { sessionAffinityFormat: "openrouter" as const } : {}),
+		promptCacheSessionHeader: "x-session-id",
+		supportsLongCacheRetention: true,
+	};
+}
+export const PROVIDER_COMPAT: ProviderCompat = providerCompat("pi");
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tiers: [] } as const;
 const THINKING_LEVELS: ProviderThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 const OMP_EFFORTS = new Set<string>(THINKING_LEVELS);
@@ -28,9 +33,14 @@ export const AUTO_MODELS = [
 ];
 
 let activeInferenceApi: ProviderApi = DEFAULT_PROVIDER_API;
+let activeHost: ProviderHost = "pi";
 
 export function setInferenceApi(api?: ProviderApi): void {
 	activeInferenceApi = api === "openai-completions" ? "openai-completions" : DEFAULT_PROVIDER_API;
+}
+
+export function setHost(host?: ProviderHost): void {
+	activeHost = host === "omp" ? "omp" : "pi";
 }
 
 function providerApi(): ProviderApi {
@@ -39,7 +49,7 @@ function providerApi(): ProviderApi {
 
 function modelCompat(omitMaxOutputTokens = false): ProviderCompat {
 	return {
-		...PROVIDER_COMPAT,
+		...providerCompat(),
 		...(providerApi() === DEFAULT_PROVIDER_API && omitMaxOutputTokens ? { supportsMaxOutputTokens: false } : {}),
 	};
 }
@@ -504,7 +514,7 @@ function buildProviderEntry(config: OmniConfig, models: ProviderModelConfig[]): 
 		apiKey: config.apiKey || "omniroute-public",
 		api: providerApi(),
 		authHeader: true,
-		compat: PROVIDER_COMPAT,
+		compat: providerCompat(),
 		models,
 	};
 }
@@ -530,7 +540,7 @@ function persistModels(agentHome: string, config: OmniConfig, models: ProviderMo
 		baseUrl: `${config.serverUrl}/v1`,
 		api: providerApi(),
 		authHeader: true,
-		compat: PROVIDER_COMPAT,
+		compat: providerCompat(),
 		models: persistedModels,
 	};
 	// Persist the settings-file key so hosts that load the provider from
@@ -608,7 +618,7 @@ export function reloadOmniProvider(pi: OmniPI, agentHome: string, config: OmniCo
 		apiKey: config.apiKey || "omniroute-public",
 		api: providerApi(),
 		authHeader: true,
-		compat: PROVIDER_COMPAT,
+		compat: providerCompat(),
 		models,
 	});
 }

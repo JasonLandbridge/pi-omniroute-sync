@@ -184,4 +184,6 @@ export interface AgentHomeOptions {
 	createInput(initialValue: string): OmniInput;
 	/** Wire API for OmniRoute. OMP uses chat completions; Pi defaults to Responses. */
 	inferenceApi?: ProviderApi;
+	/** Host runtime; controls host-specific compat keys (e.g. sessionAffinityFormat is Pi-only). */
+	host?: "pi" | "omp";
 }

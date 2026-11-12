@@ -7,6 +7,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	await createOmniExtension(pi as unknown as OmniPI, {
 		homeEnvVar: "PI_HOME",
 		defaultHome: "~/.pi/agent",
+		host: "pi",
 		matchesKey,
 		createInput: (initialValue) => {
 			const input = new Input();

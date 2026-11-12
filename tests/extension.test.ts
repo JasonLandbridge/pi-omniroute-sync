@@ -15,6 +15,7 @@ const providerMocks = vi.hoisted(() => ({
 	isSyncStale: vi.fn().mockReturnValue(false),
 	registerOmniProvider: vi.fn().mockResolvedValue([]),
 	reloadOmniProvider: vi.fn(),
+	setHost: vi.fn(),
 	setInferenceApi: vi.fn(),
 	testChat: vi.fn().mockResolvedValue("ok"),
 	transformProviderPayload: vi.fn((payload) => payload),
@@ -97,6 +98,7 @@ async function createExtension(home: string, pi = fakePi()): Promise<FakePi> {
 	await createOmniExtension(pi, {
 		homeEnvVar: "PI_HOME",
 		defaultHome: "~/.pi/agent",
+		host: "omp",
 		matchesKey: (data, key) => ({ "\t": "tab", "\r": "enter", "\x1b": "escape", "\x15": "ctrl+u", "\x03": "ctrl+c" }[data] ?? data) === key,
 		createInput: (initialValue) => {
 			let value = initialValue;
@@ -131,6 +133,7 @@ beforeEach(() => {
 	providerMocks.isSyncStale.mockReturnValue(false);
 	providerMocks.registerOmniProvider.mockReset().mockResolvedValue([]);
 	providerMocks.reloadOmniProvider.mockClear();
+	providerMocks.setHost.mockClear();
 	providerMocks.setInferenceApi.mockClear();
 	providerMocks.transformProviderPayload.mockClear();
 	usageMocks.loadUsageReport.mockReset().mockResolvedValue({ entries: [], intervalMinutes: 70, lastAutoSyncAt: null, denied: false, errors: [] });
@@ -164,6 +167,13 @@ describe("usage command and key scope", () => {
 		await pi.commands.get("omni")!.handler("setup", ui);
 
 		expect(ui.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Management scope detected"), "info");
+	});
+
+	it("initializes host-aware compat for the running host", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		await createExtension(home);
+
+		expect(providerMocks.setHost).toHaveBeenCalledWith("omp");
 	});
 
 	it("renders the usage report for configured accounts", async () => {

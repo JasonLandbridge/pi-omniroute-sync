@@ -15,7 +15,7 @@ import {
 } from "./config.ts";
 import { ConfigDialog, summarizeModels, type ModelSummary } from "./config-dialog.ts";
 import type { AgentHomeOptions, OmniContext, OmniPI, ProviderModelConfig } from "./contracts.ts";
-import { AUTO_MODELS, checkModelsEndpoint, discoverModels, isSyncStale, probeHealth, probeManagementScope, registerOmniProvider, reloadOmniProvider, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
+import { AUTO_MODELS, checkModelsEndpoint, discoverModels, isSyncStale, probeHealth, probeManagementScope, registerOmniProvider, reloadOmniProvider, setHost, setInferenceApi, testChat, transformProviderPayload } from "./provider.ts";
 import { formatCostsReport, loadCostsReport, COST_RANGES, type CostRange } from "./costs.ts";
 import { formatUsageReport, loadUsageReport } from "./usage.ts";
 import { registerGatewayTelemetry } from "./gateway-telemetry.ts";
@@ -220,6 +220,7 @@ async function runSetup(ctx: OmniContext, pi: OmniPI, agentHome: string): Promis
 
 export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions): Promise<void> {
 	setInferenceApi(options.inferenceApi);
+	setHost(options.host);
 	const agentHome = resolveAgentHome(options);
 	let config = loadConfig(agentHome);
 	let healthTimer: ReturnType<typeof setInterval> | undefined;

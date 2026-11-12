@@ -2,16 +2,48 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, probeHealth, probeManagementScope, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
+import { checkHealth, globMatches, isGlobalRoutingModel, isSyncStale, modelCost, normalizePersistedModels, probeHealth, probeManagementScope, providerCompat, PROVIDER_COMPAT, registerOmniProvider, reloadOmniProvider, setHost, setInferenceApi, shouldIncludeModel, transformProviderPayload, usableProviderAliases } from "../src/provider.ts";
 import { saveConfig } from "../src/config.ts";
 
 const fetchStub = vi.spyOn(globalThis, "fetch");
 
-afterEach(() => fetchStub.mockReset());
+afterEach(() => {
+	fetchStub.mockReset();
+	setHost("pi");
+});
 
 it("uses OmniRoute's supported session-affinity headers", () => {
 	expect(PROVIDER_COMPAT.sessionAffinityFormat).toBe("openrouter");
 	expect(PROVIDER_COMPAT.promptCacheSessionHeader).toBe("x-session-id");
+});
+
+it("emits sessionAffinityFormat only for Pi hosts", () => {
+	expect(providerCompat("pi")).toMatchObject({ sessionAffinityFormat: "openrouter", promptCacheSessionHeader: "x-session-id" });
+	expect(providerCompat("omp")).toEqual({ promptCacheSessionHeader: "x-session-id", supportsLongCacheRetention: true });
+});
+
+it("persists host-appropriate compat for omp and pi", async () => {
+	fetchStub.mockImplementation(async (input) => {
+		const url = String(input);
+		const body = url.endsWith("/v1/models") ? { data: [{ id: "openai/gpt-5", name: "GPT-5" }] } : {};
+		return new Response(JSON.stringify(body), { status: 200 });
+	});
+	const agentHome = mkdtempSync(join(tmpdir(), "pi-omni-provider-"));
+	saveConfig(agentHome, { serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" });
+	const config = { serverUrl: "http://localhost:20128", apiKey: "secret", providerName: "omni" };
+	const settings = { onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none" as const, fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret", registerTools: false };
+
+	setHost("omp");
+	await registerOmniProvider({ registerProvider: vi.fn() } as never, agentHome, config, settings);
+	let persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
+	expect(persisted.providers.omni.compat.sessionAffinityFormat).toBeUndefined();
+	expect(persisted.providers.omni.models[0].compat.sessionAffinityFormat).toBeUndefined();
+
+	setHost("pi");
+	await registerOmniProvider({ registerProvider: vi.fn() } as never, agentHome, config, settings);
+	persisted = JSON.parse(readFileSync(join(agentHome, "models.json"), "utf8"));
+	expect(persisted.providers.omni.compat.sessionAffinityFormat).toBe("openrouter");
+	expect(persisted.providers.omni.models[0].compat.sessionAffinityFormat).toBe("openrouter");
 });
 
 it("checks OmniRoute's lightweight health endpoint", async () => {
