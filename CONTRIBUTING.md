@@ -86,7 +86,7 @@ Do not document separate state files or configuration paths unless the implement
 - Put shared behavior in the narrowest existing module under `src/`.
 - Preserve the normal `/model <model-id>` experience and the single `omni` provider; do not install or enable another OmniRoute extension alongside this package.
 - Use the host's native Responses implementation and TUI input/key handling.
-- Never write the API key to `models.json`.
+- Persist the settings-file API key in the `models.json` provider entry (`apiKey` + `auth: "apiKey"`) so hosts that load the provider from disk can authenticate on key-required gateways; when no key is configured, persist `auth: "none"` (keyless). Never persist keys that come only from environment variables.
 - Keep synchronization transactional: failed discovery must preserve the previous registered and persisted model catalog.
 - Propagate cancellation through network operations and retain bounded timeouts.
 - Prefer targeted changes and tests over new abstractions or dependencies.

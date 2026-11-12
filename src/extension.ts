@@ -403,50 +403,52 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		if (ctx.hasUI && event.model?.id) ctx.ui.setStatus("omni", `→ ${event.model.id}`);
 	});
 
-	pi.registerTool({
-		name: "omniroute_status",
-		label: "OmniRoute Status",
-		description: "Return OmniRoute health and provider registration status.",
-		parameters: { type: "object", properties: {} },
-		async execute(_id, _params, signal) {
-			const current = loadProbeConfig(agentHome);
-			const hop = loadHopSettings(agentHome);
-			const result = await unreachable.probe(current, signal);
-			const configured = isConfigured(agentHome);
-			return {
-				content: [
-					{
-						type: "text",
-						text: `OmniRoute ${result.ok ? "reachable" : result.unreachable ? "unreachable" : "health check failed"}; configured: ${configured}; provider: ${current.providerName}.`,
+	if (loadSettings(agentHome).registerTools) {
+		pi.registerTool({
+			name: "omniroute_status",
+			label: "OmniRoute Status",
+			description: "Return OmniRoute health and provider registration status.",
+			parameters: { type: "object", properties: {} },
+			async execute(_id, _params, signal) {
+				const current = loadProbeConfig(agentHome);
+				const hop = loadHopSettings(agentHome);
+				const result = await unreachable.probe(current, signal);
+				const configured = isConfigured(agentHome);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `OmniRoute ${result.ok ? "reachable" : result.unreachable ? "unreachable" : "health check failed"}; configured: ${configured}; provider: ${current.providerName}.`,
+						},
+					],
+					details: {
+						ok: result.ok,
+						unreachable: result.unreachable,
+						configured,
+						serverUrl: current.serverUrl,
+						providerName: current.providerName,
+						onUnreachable: hop.onUnreachable,
+						fallbackModel: hop.fallbackModel,
 					},
-				],
-				details: {
-					ok: result.ok,
-					unreachable: result.unreachable,
-					configured,
-					serverUrl: current.serverUrl,
-					providerName: current.providerName,
-					onUnreachable: hop.onUnreachable,
-					fallbackModel: hop.fallbackModel,
-				},
-			};
-		},
-	});
+				};
+			},
+		});
 
-	pi.registerTool({
-		name: "omniroute_sync",
-		label: "OmniRoute Sync",
-		description: "Fetch /v1/models from OmniRoute and register them as a provider.",
-		parameters: { type: "object", properties: {} },
-		async execute(_id, _params, signal) {
-			const current = loadConfig(agentHome);
-			const models = await registerOmniProvider(pi, agentHome, current, loadSettings(agentHome), signal);
-			return {
-				content: [{ type: "text", text: `OmniRoute synced ${models.length} model(s).` }],
-				details: { count: models.length, provider: current.providerName },
-			};
-		},
-	});
+		pi.registerTool({
+			name: "omniroute_sync",
+			label: "OmniRoute Sync",
+			description: "Fetch /v1/models from OmniRoute and register them as a provider.",
+			parameters: { type: "object", properties: {} },
+			async execute(_id, _params, signal) {
+				const current = loadConfig(agentHome);
+				const models = await registerOmniProvider(pi, agentHome, current, loadSettings(agentHome), signal);
+				return {
+					content: [{ type: "text", text: `OmniRoute synced ${models.length} model(s).` }],
+					details: { count: models.length, provider: current.providerName },
+				};
+			},
+		});
+	}
 
 	pi.registerCommand("omni", {
 		description: "OmniRoute: /omni [setup|sync|models|test|dashboard|config|autosync|help]",

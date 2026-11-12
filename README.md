@@ -18,7 +18,7 @@
 - Optional global `auto` and `auto/*` routing models.
 - Real cost metadata from OmniRoute's pricing API, with zero-cost fallback when pricing is unavailable.
 - Background catalog autosync while a session is running, configurable from `/omni config` or `/omni autosync`.
-- Secure extension-owned settings; API keys are never copied to `models.json`.
+- Secure extension-owned settings; the configured API key is persisted to `models.json` so hosts can authenticate on gateways that require keys (environment-only keys are never copied).
 - Health status, model browsing, and direct model testing commands. Health checks use OmniRoute's lightweight `/api/health/ping` endpoint instead of downloading the full model catalog.
 
 ## Requirements
@@ -137,6 +137,7 @@ Default settings:
   "modelCacheTtlMinutes": 60,
   "autoSyncIntervalSeconds": 300,
   "showGatewayTokensPerSecond": false,
+  "registerTools": false,
   "lastSuccessfulSyncAt": 0,
   "onUnreachable": "none",
   "fallbackModel": "",
@@ -158,10 +159,11 @@ Default settings:
 | `modelCacheTtlMinutes` | number | `60` | Number of minutes before the last successful sync is stale. Must be non-negative; `0` means always stale. |
 | `autoSyncIntervalSeconds` | number | `300` | Background catalog refresh interval in seconds while a session is running. Configure it in `/omni config` or `/omni autosync`; `0` disables autosync. |
 | `showGatewayTokensPerSecond` | boolean | `false` | Displays gateway-reported tok/s after OmniRoute turns when enabled. Configure it in `/omni config`; disabling it does not affect inference requests. |
+| `registerTools` | boolean | `false` | Registers the `omniroute_status` and `omniroute_sync` agent tools. Configure it in `/omni config`; takes effect on the next host restart. Autosync and the `/omni` commands do not depend on these tools. |
 | `lastSuccessfulSyncAt` | number | `0` | Unix timestamp in milliseconds maintained automatically after successful syncs. `0` means no successful sync has been recorded. |
 | `onUnreachable` | `"none"` \| `"host-fallback"` | `none` | When `host-fallback`, probe the configured `serverUrl` before send and hop to `fallbackModel` if the gateway is down or times out. Configure it in `/omni config`. |
 | `fallbackModel` | string | empty | Authenticated host `provider/id` for the on-unreachable hop, for example `anthropic/claude-sonnet-4`. Empty means notify only. Configure it in `/omni config`. |
-| `apiKey` | string | empty | Bearer token sent to OmniRoute. Stored only in the protected extension settings file. |
+| `apiKey` | string | empty | Bearer token sent to OmniRoute. Stored in the protected extension settings file and copied to the `omni` provider entry in `models.json` (as `apiKey` with `auth: "apiKey"`) so hosts loading the provider from disk can authenticate on gateways that require keys. Keys supplied only through environment variables are never written to either file. |
 
 
 Note: OmniRoute's `/v1/models` response can include models from providers that have no configured credentials or active connection. The default `onlyShowUsableModels: true` hides those catalog-only models when `/api/providers` is available. If provider verification is unavailable (for example, an inference-only key receives `403`), synchronization fails open and keeps the advertised catalog visible.
@@ -357,13 +359,15 @@ For normal startup synchronization and complete configuration management, run `/
 | `~/.omp/agent/extensions/pi-omniroute-sync/settings.json` | All extension configuration, the API key, and the last successful sync timestamp. |
 | `~/.omp/agent/models.json` | Persisted provider metadata and synchronized models. |
 
-`settings.json` is the extension's only state/configuration file. The API key is used at runtime when registering the provider but is deliberately omitted from `models.json`. The persisted OmniRoute provider is marked `auth: "none"` so OMP can validate its custom model catalog before the extension restores the protected key at runtime. Other providers already present in `models.json` are preserved when OmniRoute synchronizes.
+`settings.json` is the extension's only state/configuration file. The API key configured through `/omni setup` or `/omni config` is used at runtime when registering the provider and is also copied to the persisted OmniRoute entry in `models.json` (as `apiKey` with `auth: "apiKey"`), so hosts that load the provider from disk — OMP's `models.yml` migration, Pi's model registry — can authenticate when the gateway requires API keys. Keys supplied only through environment variables are never written to either file, and the runtime registration still restores them in-session. When no key is configured, the persisted provider stays `auth: "none"` (keyless), matching an open gateway. Other providers already present in `models.json` are preserved when OmniRoute synchronizes.
 
 Treat `settings.json` as a secret. Do not commit it or copy it into a repository.
 
 ## Agent-Callable Tools
 
-The extension registers two tools that the active model may call:
+Tool registration is **off by default** to keep agent context lean. Set `registerTools: true` in `/omni config` (or the settings file) and restart the host to enable them. Autosync and the `/omni` commands work regardless of this setting.
+
+When enabled, the extension registers two tools that the active model may call:
 
 ### `omniroute_status`
 

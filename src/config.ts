@@ -25,6 +25,8 @@ export interface OmniSettings {
 	autoSyncIntervalSeconds: number;
 	/** Display gateway-reported tok/s after OmniRoute turns. */
 	showGatewayTokensPerSecond: boolean;
+	/** Register the omniroute_status and omniroute_sync agent tools. Default false. */
+	registerTools: boolean;
 	lastSuccessfulSyncAt: number;
 	onUnreachable: OnUnreachable;
 	fallbackModel: string;
@@ -43,6 +45,7 @@ const DEFAULT_SETTINGS: OmniSettings = {
 	modelCacheTtlMinutes: 60,
 	autoSyncIntervalSeconds: 300,
 	showGatewayTokensPerSecond: false,
+	registerTools: false,
 	lastSuccessfulSyncAt: 0,
 	onUnreachable: "none",
 	fallbackModel: "",
@@ -85,6 +88,7 @@ export function sanitizeSettings(input: Partial<OmniSettings>): OmniSettings {
 				? Math.floor(intervalSeconds)
 				: DEFAULT_SETTINGS.autoSyncIntervalSeconds,
 		showGatewayTokensPerSecond: input.showGatewayTokensPerSecond === true,
+		registerTools: input.registerTools === true,
 		lastSuccessfulSyncAt:
 			Number.isFinite(input.lastSuccessfulSyncAt) && input.lastSuccessfulSyncAt! >= 0 ? input.lastSuccessfulSyncAt! : 0,
 		onUnreachable: ON_UNREACHABLE_VALUES.includes(input.onUnreachable as OnUnreachable)

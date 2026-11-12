@@ -115,7 +115,7 @@ export class ConfigDialog implements OmniComponent {
 		if (this.matchesKey(data, "ctrl+c")) return this.done(undefined);
 		if (this.matchesKey(data, "escape")) return this.done({ ...this.draft });
 		if (this.matchesKey(data, "space")) {
-			if (this.tab === "config" && [2, 3, 6, 9, 11].includes(this.selected)) this.toggleSelectedBoolean();
+			if (this.tab === "config" && [2, 3, 6, 9, 11, 14].includes(this.selected)) this.toggleSelectedBoolean();
 			return;
 		}
 		if (this.matchesKey(data, "left") || this.matchesKey(data, "shift+tab") || this.matchesKey(data, "[")) return this.switchTab("summary");
@@ -198,14 +198,14 @@ export class ConfigDialog implements OmniComponent {
 	}
 
 	private move(delta: number): void {
-		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 14) - 1, this.selected + delta));
+		this.selected = Math.max(0, Math.min((this.tab === "summary" ? 1 : 15) - 1, this.selected + delta));
 		this.status = this.rowDescription();
 	}
 
 	private activate(): void {
 		if (this.tab === "summary") return this.sync();
 		if (this.selected === 0) return this.startEditing("serverUrl", this.draft.serverUrl);
-		if ([2, 3, 6, 9, 11].includes(this.selected)) return this.toggleSelectedBoolean();
+		if ([2, 3, 6, 9, 11, 14].includes(this.selected)) return this.toggleSelectedBoolean();
 		if (this.selected === 4) return this.startEditing("includeModels", this.draft.includeModels.join(", "));
 		if (this.selected === 5) return this.startEditing("excludeModels", this.draft.excludeModels.join(", "));
 		if (this.selected === 7) return this.startEditing("modelCacheTtlMinutes", String(this.draft.modelCacheTtlMinutes));
@@ -245,6 +245,11 @@ export class ConfigDialog implements OmniComponent {
 		if (this.selected === 9) {
 			this.draft.onUnreachable = this.draft.onUnreachable === "host-fallback" ? "none" : "host-fallback";
 			this.status = `Unreachable behavior set to ${this.draft.onUnreachable} in draft. Escape saves and closes.`;
+			return;
+		}
+		if (this.selected === 14) {
+			this.draft.registerTools = !this.draft.registerTools;
+			this.status = `Agent tools ${this.draft.registerTools ? "will be registered" : "will stay unregistered"} after the host restarts. Escape saves and closes.`;
 			return;
 		}
 		this.draft.showGatewayTokensPerSecond = !this.draft.showGatewayTokensPerSecond;
@@ -317,6 +322,9 @@ export class ConfigDialog implements OmniComponent {
 			this.theme.bold("Credentials"),
 			this.row(12, "API key", this.draft.apiKey ? "configured — replace" : "not configured — set"),
 			this.row(13, "Clear API key", this.draft.apiKey ? "available" : "already empty"),
+			"",
+			this.theme.bold("Agent tools"),
+			this.row(14, "Register agent tools", this.draft.registerTools ? "on" : "off", true),
 		];
 	}
 
