@@ -382,6 +382,8 @@ it("maps vision capabilities, limits, and pricing from the catalog", async () =>
 			return new Response(JSON.stringify({
 				data: [
 					{ id: "openai/gpt-vision", name: "Vision", capabilities: { vision: true, tool_calling: true }, effort_tiers: ["low", "high"], context_length: 200000, max_output_tokens: 64000 },
+					{ id: "codex/gpt-6.1-sol", name: "Sol", capabilities: { effort_tiers: ["low", "medium", "high", "xhigh", "max", "ultra"] } },
+					{ id: "legacy/reasoning", name: "Legacy", effort_tiers: ["none", "low"] },
 					{ id: "google/audio-only", name: "Audio", type: "audio" },
 				],
 			}), { status: 200 });
@@ -397,10 +399,14 @@ it("maps vision capabilities, limits, and pricing from the catalog", async () =>
 		{ onlyShowUsableModels: false, showGlobalRoutingModels: false, includeModels: [], excludeModels: [], syncOnStartup: true, modelCacheTtlMinutes: 60, autoSyncIntervalSeconds: 300, showGatewayTokensPerSecond: true, lastSuccessfulSyncAt: 0, onUnreachable: "none", fallbackModel: "", serverUrl: "http://localhost:20128", providerName: "omni", apiKey: "secret" },
 	);
 	const vision = models.find((model) => model.id === "openai/gpt-vision");
+	const sol = models.find((model) => model.id === "codex/gpt-6.1-sol");
+	const legacy = models.find((model) => model.id === "legacy/reasoning");
 	expect(vision?.input).toEqual(["text", "image"]);
 	expect(vision?.supportsTools).toBe(true);
 	expect(vision?.thinking?.efforts).toEqual(["low", "high"]);
-	expect(vision?.thinkingLevelMap).toEqual({ off: "none", minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: null });
+	expect(vision?.thinkingLevelMap).toEqual({ low: "low", high: "high" });
+	expect(sol?.thinkingLevelMap).toEqual({ low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max", ultra: "ultra" });
+	expect(legacy?.thinkingLevelMap).toEqual({ off: "none", low: "low" });
 	expect(vision?.contextWindow).toBe(200000);
 	expect(vision?.maxTokens).toBe(64000);
 	expect(vision?.cost.input).toBe(5);

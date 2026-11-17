@@ -86,7 +86,7 @@ export interface OmniContext {
 }
 
 export type ProviderApi = "openai-completions" | "openai-responses";
-export type ProviderThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ProviderThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type ProviderThinkingLevelMap = Partial<Record<ProviderThinkingLevel, string | null>>;
 
 export interface OmniThinking {

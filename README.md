@@ -116,7 +116,7 @@ Examples:
 /omni autosync 300
 ```
 
-Autosync runs only while the host session is active. It refreshes the catalog in the background, keeps the last successful catalog when a refresh fails, and stops when the session shuts down. The interval is also editable as **Auto-sync interval** in the `/omni config` dialog; enter seconds, or `0` to disable it.
+Autosync runs only while the host session is active. It refreshes the catalog in the background, keeps the last successful catalog when a refresh fails, and stops when the session shuts down. If background refresh warnings are not useful, run `/omni autosync off`; inference continues using the last successful catalog, and `/omni sync` remains available for manual refreshes. The interval is also editable as **Auto-sync interval** in the `/omni config` dialog; enter seconds, or `0` to disable it.
 
 ## Usage and costs
 
@@ -328,7 +328,7 @@ Each synchronization maps OmniRoute `/v1/models` metadata onto the host model ca
 | Missing output limit | Omits the output-token field on the wire through the host compatibility hook |
 | `input_modalities` and `capabilities.vision`, `attachment`, `pdf`, or `video` | `input: ["text", "image"]` |
 | `capabilities.tool_calling` | `supportsTools` |
-| `effort_tiers` (top-level or under `capabilities`) | Reasoning effort controls |
+| `effort_tiers` (top-level or under `capabilities`) | Reasoning effort controls; only advertised tiers are mapped, `none` becomes Pi's `off`, and tiers such as `ultra` are preserved |
 
 Audio, video, and PDF remain gateway capabilities because Pi and OMP only accept `text` and `image` as stored input kinds. Vision-capable models are advertised as accepting `image` input.
 

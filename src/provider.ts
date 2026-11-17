@@ -15,8 +15,8 @@ export function providerCompat(host: ProviderHost = activeHost): ProviderCompat 
 }
 export const PROVIDER_COMPAT: ProviderCompat = providerCompat("pi");
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tiers: [] } as const;
-const THINKING_LEVELS: ProviderThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
-const OMP_EFFORTS = new Set<string>(THINKING_LEVELS);
+const THINKING_LEVELS: ProviderThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const OMP_EFFORTS = new Set<string>(["none", ...THINKING_LEVELS]);
 const VISUAL_MODALITIES = new Set(["image", "pdf", "video"]);
 const NON_CHAT_TYPES = new Set(["image", "embedding", "rerank", "audio", "video", "pdf"]);
 export const AUTO_MODELS = [
@@ -278,10 +278,12 @@ function mapThinking(model: OmniApiModel): OmniThinking | undefined {
 function thinkingLevelMap(thinking: OmniThinking | undefined): ProviderThinkingLevelMap | undefined {
 	if (!thinking) return undefined;
 	const supported = new Set(thinking.efforts);
-	return {
-		off: "none",
-		...Object.fromEntries(THINKING_LEVELS.map((level) => [level, supported.has(level) ? level : null])),
-	} as ProviderThinkingLevelMap;
+	const map: ProviderThinkingLevelMap = {};
+	if (supported.has("none")) map.off = "none";
+	for (const level of THINKING_LEVELS) {
+		if (supported.has(level)) map[level] = level;
+	}
+	return map;
 }
 
 function positiveNumber(value: unknown): number | undefined {
