@@ -240,6 +240,124 @@ describe("usage command and key scope", () => {
 	});
 });
 
+describe("background sync warning confirmation", () => {
+	it("silences a failed refresh when its delayed retry succeeds", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		providerMocks.registerOmniProvider.mockRejectedValueOnce(new Error("503: <html>Unavailable</html>"));
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(providerMocks.registerOmniProvider).toHaveBeenCalledTimes(2);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		pi.events.get("session_shutdown")!();
+	});
+
+	it("warns once per outage without HTML and rearms after recovery", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		providerMocks.registerOmniProvider.mockRejectedValue(new Error("503: <html>Unavailable</html>"));
+		await vi.advanceTimersByTimeAsync(69_999);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		const warning = "OmniRoute auto-sync still failing after 10 seconds (HTTP 503). Using previous models; background sync will continue.";
+		expect(ui.ui.notify).toHaveBeenCalledExactlyOnceWith(warning, "warning");
+		await vi.advanceTimersByTimeAsync(120_000);
+		expect(ui.ui.notify).toHaveBeenCalledTimes(1);
+		providerMocks.registerOmniProvider.mockResolvedValueOnce([]);
+		await vi.advanceTimersByTimeAsync(50_000);
+		await vi.advanceTimersByTimeAsync(70_000);
+		expect(ui.ui.notify).toHaveBeenNthCalledWith(2, warning, "warning");
+		expect(ui.ui.notify).toHaveBeenCalledTimes(2);
+		pi.events.get("session_shutdown")!();
+	});
+
+	it("cancels a pending refresh retry when autosync is disabled", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		providerMocks.registerOmniProvider.mockRejectedValue(new Error("503: unavailable"));
+		await vi.advanceTimersByTimeAsync(60_000);
+		await pi.commands.get("omni")!.handler("autosync off", ui);
+		vi.mocked(ui.ui.notify).mockClear();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(providerMocks.registerOmniProvider).toHaveBeenCalledTimes(1);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		pi.events.get("session_shutdown")!();
+	});
+});
+
+describe("startup health warning grace period", () => {
+	it("suppresses transient failures that recover during the grace period", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		providerMocks.probeHealth.mockResolvedValueOnce({ ok: false, unreachable: true });
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		expect(ui.ui.setStatus).not.toHaveBeenCalledWith("omni", "OmniRoute unreachable");
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		expect(ui.ui.setStatus).toHaveBeenLastCalledWith("omni", undefined);
+		pi.events.get("session_shutdown")!();
+	});
+
+	it("warns only after ten seconds and a confirmed failure", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		providerMocks.probeHealth.mockResolvedValue({ ok: false, unreachable: true });
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		await vi.advanceTimersByTimeAsync(9_999);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(ui.ui.notify).toHaveBeenCalledExactlyOnceWith(
+			`OmniRoute unreachable at ${baseSettings.serverUrl}. Run /omni sync after reconnecting.`, "warning",
+		);
+		expect(ui.ui.setStatus).toHaveBeenLastCalledWith("omni", "OmniRoute unreachable");
+		pi.events.get("session_shutdown")!();
+	});
+
+	it("waits for confirmation before declaring the gateway unreachable", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		const confirmation = Promise.withResolvers<{ ok: boolean; unreachable: boolean }>();
+		providerMocks.probeHealth.mockResolvedValueOnce({ ok: false, unreachable: true })
+			.mockReturnValueOnce(confirmation.promise);
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		confirmation.resolve({ ok: true, unreachable: false });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+		pi.events.get("session_shutdown")!();
+	});
+
+	it("cancels pending warnings when the session shuts down", async () => {
+		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
+		saveSettings(home, baseSettings);
+		providerMocks.probeHealth.mockResolvedValue({ ok: false, unreachable: true });
+		const pi = await createExtension(home);
+		const ui = context();
+		await pi.events.get("session_start")!({}, ui);
+		pi.events.get("session_shutdown")!();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(ui.ui.notify).not.toHaveBeenCalled();
+	});
+});
+
 describe("stale context guards", () => {
 	it("guards health timer status updates against stale contexts", async () => {
 		const home = mkdtempSync(join(tmpdir(), "pi-omni-extension-"));
@@ -267,12 +385,12 @@ describe("stale context guards", () => {
 		const pi = await createExtension(home);
 		const sessionStart = pi.events.get("session_start")!;
 		const sessionShutdown = pi.events.get("session_shutdown")!;
-		providerMocks.registerOmniProvider.mockRejectedValueOnce(new Error("sync failed"));
+		providerMocks.registerOmniProvider.mockRejectedValue(new Error("sync failed"));
 		const staleUi = context({ notify: vi.fn(() => {
 			throw new Error("stale extension generation after reload");
 		}) });
 		await sessionStart({}, staleUi);
-		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.advanceTimersByTimeAsync(70_000);
 		expect(providerMocks.registerOmniProvider).toHaveBeenCalled();
 		expect(staleUi.ui.notify).toHaveBeenCalled();
 		sessionShutdown();

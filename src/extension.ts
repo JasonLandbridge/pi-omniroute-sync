@@ -224,8 +224,11 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	const agentHome = resolveAgentHome(options);
 	let config = loadConfig(agentHome);
 	let healthTimer: ReturnType<typeof setInterval> | undefined;
+	let healthWarningTimer: ReturnType<typeof setTimeout> | undefined;
 	let healthProbeAbortController: AbortController | undefined;
 	let autoSyncTimer: ReturnType<typeof setInterval> | undefined;
+	let autoSyncWarningTimer: ReturnType<typeof setTimeout> | undefined;
+	let autoSyncWarningShown = false;
 	let sessionCtx: OmniContext | undefined;
 	let syncInFlight: Promise<number> | null = null;
 	let lastSyncCount = 0;
@@ -295,6 +298,9 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 			const models = await registerOmniProvider(pi, agentHome, config, loadSettings(agentHome), ctx?.signal);
 			const previous = lastSyncCount;
 			lastSyncCount = models.length;
+			clearTimeout(autoSyncWarningTimer);
+			autoSyncWarningTimer = undefined;
+			autoSyncWarningShown = false;
 			const notifyCtx = ctx ?? sessionCtx;
 			if (!quiet) safeNotify(notifyCtx, `OmniRoute synced ${models.length} model(s).`, "info");
 			else if (previous > 0 && previous !== models.length) {
@@ -310,6 +316,8 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 	function stopAutoSync(): void {
 		if (autoSyncTimer) clearInterval(autoSyncTimer);
 		autoSyncTimer = undefined;
+		clearTimeout(autoSyncWarningTimer);
+		autoSyncWarningTimer = undefined;
 	}
 
 	function startAutoSync(ctx: OmniContext): void {
@@ -318,8 +326,22 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		const intervalSeconds = loadSettings(agentHome).autoSyncIntervalSeconds;
 		if (intervalSeconds === 0) return;
 		autoSyncTimer = setInterval(() => {
-			void sync(undefined, { quiet: true }).catch((error) => {
-				safeNotify(sessionCtx, `OmniRoute auto-sync failed: ${(error as Error).message}`, "warning");
+			void sync(undefined, { quiet: true }).catch(() => {
+				if (!autoSyncTimer || autoSyncWarningTimer || autoSyncWarningShown) return;
+				autoSyncWarningTimer = setTimeout(async () => {
+					try {
+						await sync(undefined, { quiet: true });
+					} catch (error) {
+						if (!autoSyncTimer || autoSyncWarningShown) return;
+						autoSyncWarningShown = true;
+						const failure = error as Error & { status?: number };
+						const status = failure.status ?? failure.message.match(/^([45]\d{2}):/)?.[1];
+						const reason = status ? `HTTP ${status}` : failure.message.split(/\r?\n|</, 1)[0].trim();
+						safeNotify(sessionCtx, `OmniRoute auto-sync still failing after 10 seconds${reason ? ` (${reason})` : ""}. Using previous models; background sync will continue.`, "warning");
+					} finally {
+						autoSyncWarningTimer = undefined;
+					}
+				}, 10_000);
 			});
 		}, intervalSeconds * 1000);
 	}
@@ -352,15 +374,29 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 		startAutoSync(ctx);
 		if (!ctx.hasUI) return;
 		const probeConfig = loadProbeConfig(agentHome);
+		clearTimeout(healthWarningTimer);
+		healthWarningTimer = undefined;
 		healthProbeAbortController?.abort();
 		healthProbeAbortController = new AbortController();
-		const result = await unreachable.probe(probeConfig, ctx.signal ?? healthProbeAbortController.signal);
-		safeSetStatus(ctx, "omni", healthStatus(result));
+		const signal = ctx.signal
+			? AbortSignal.any([ctx.signal, healthProbeAbortController.signal])
+			: healthProbeAbortController.signal;
+		const result = await unreachable.probe(probeConfig, signal);
+		if (signal.aborted) return;
+		safeSetStatus(ctx, "omni", undefined);
 		if (!result.ok) {
-			const message = result.unreachable
-				? `OmniRoute unreachable at ${probeConfig.serverUrl}. Run /omni sync after reconnecting.`
-				: `OmniRoute health check failed at ${probeConfig.serverUrl}.`;
-			safeNotify(ctx, message, "warning");
+			// A transient startup failure must survive the grace period and a fresh probe.
+			healthWarningTimer = setTimeout(async () => {
+				healthWarningTimer = undefined;
+				const confirmed = await unreachable.probe(probeConfig, signal, true);
+				if (signal.aborted) return;
+				safeSetStatus(ctx, "omni", healthStatus(confirmed));
+				if (confirmed.ok) return;
+				const message = confirmed.unreachable
+					? `OmniRoute unreachable at ${probeConfig.serverUrl}. Run /omni sync after reconnecting.`
+					: `OmniRoute health check failed at ${probeConfig.serverUrl}.`;
+				safeNotify(ctx, message, "warning");
+			}, 10_000);
 		}
 		if (healthTimer) clearInterval(healthTimer);
 		healthTimer = setInterval(async () => {
@@ -375,6 +411,8 @@ export async function createOmniExtension(pi: OmniPI, options: AgentHomeOptions)
 
 	pi.on("session_shutdown", () => {
 		if (healthTimer) clearInterval(healthTimer);
+		clearTimeout(healthWarningTimer);
+		healthWarningTimer = undefined;
 		healthTimer = undefined;
 		healthProbeAbortController?.abort();
 		healthProbeAbortController = undefined;

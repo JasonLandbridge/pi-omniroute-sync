@@ -3,7 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/pi-omniroute-sync.svg?style=flat-square)](https://www.npmjs.com/package/pi-omniroute-sync)
 [![npm downloads](https://img.shields.io/npm/dm/pi-omniroute-sync.svg?style=flat-square)](https://www.npmjs.com/package/pi-omniroute-sync)
 
-[OmniRoute]([OmniRoute](https://github.com/diegosouzapw/OmniRoute)) models sync extension for [Pi Coding Agent](https://pi.dev) (pi) and [Oh My Pi](https://omp.sh) (omp)!
+Connect [Pi Coding Agent](https://pi.dev) and [Oh My Pi](https://omp.sh) to [OmniRoute](https://github.com/diegosouzapw/OmniRoute) with one `omni` provider: automatic model discovery and sync, unified routing, prompt-cache affinity, usage quotas, and cost analytics.
+
+Keep using the normal `/model <model-id>` workflow—this extension does not create a second OmniRoute provider or a separate manual model list.
 
 ## What You Get
 
@@ -64,6 +66,8 @@ omp install git:github.com/JasonLandbridge/pi-omniroute-sync
 
 ## Quick Start
 
+After installing the package for [Pi](#pi-coding-agent) or [Oh My Pi](#oh-my-pi), the fastest path is:
+
 1. Start `pi` or `omp`.
 2. Run:
 
@@ -89,6 +93,8 @@ omp install git:github.com/JasonLandbridge/pi-omniroute-sync
 6. Select an OmniRoute-backed model and chat normally.
 
 You can rerun `/omni setup` whenever the server URL or API key changes. Pressing Enter at the API-key prompt preserves an existing key. Setup also probes the key's management scope: a `manage`-scoped key enables `/omni usage`, `/omni costs`, strict provider filtering, and pricing; an inference-only key is reported as a warning, and the extension keeps working without those features.
+
+At startup, a failed health probe is provisional: the extension waits 10 seconds and performs a fresh `/api/health/ping` recheck before showing a warning. If the gateway recovers during that grace period, the warning and degraded status are suppressed.
 
 ## Commands
 
@@ -117,6 +123,10 @@ Examples:
 ```
 
 Autosync runs only while the host session is active. It refreshes the catalog in the background, keeps the last successful catalog when a refresh fails, and stops when the session shuts down. If background refresh warnings are not useful, run `/omni autosync off`; inference continues using the last successful catalog, and `/omni sync` remains available for manual refreshes. The interval is also editable as **Auto-sync interval** in the `/omni config` dialog; enter seconds, or `0` to disable it.
+
+After a failed background refresh, the extension waits 10 seconds and retries before showing a warning. If the retry succeeds, no warning appears. Persistent failures produce one warning per outage, without dumping the gateway's HTML error page. The last successful catalog stays available, scheduled syncs continue, and a successful sync resets the warning state.
+
+Start with `/omni models` to browse the catalog; use `/omni usage` for quota windows, `/omni costs` for analytics, and `/omni config` for settings.
 
 ## Usage and costs
 
