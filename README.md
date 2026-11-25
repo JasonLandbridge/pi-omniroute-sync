@@ -34,6 +34,8 @@ You need:
   - Pi Coding Agent (`@earendil-works/pi-coding-agent`), or
   - Oh My Pi (`@oh-my-pi/pi-coding-agent`).
 
+The OMP adapter supports both the pre-19.2 UI (including 19.1.1) and OMP 19.2's reactive UI. Its configuration dialog uses the row-rendering interface shared by both versions, with a host-independent inline editor and keyboard handling; it does not import legacy Pi TUI components. Pi continues to use its native inline editor. OMP controls overlay positioning; Pi retains the configured overlay sizing.
+
 ## Installation
 
 ### Pi Coding Agent

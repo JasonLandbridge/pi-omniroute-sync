@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import { Input, matchesKey } from "@earendil-works/pi-tui";
+import { OmpInput, matchesOmpKey } from "./omp-input.ts";
 import type { OmniPI } from "./contracts.ts";
 import { createOmniExtension } from "./extension.ts";
 
@@ -9,11 +9,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		defaultHome: "~/.omp/agent",
 		host: "omp",
 		inferenceApi: "openai-completions",
-		matchesKey,
-		createInput: (initialValue) => {
-			const input = new Input();
-			input.setValue(initialValue);
-			return input;
-		},
+		matchesKey: matchesOmpKey,
+		createInput: (initialValue) => new OmpInput(initialValue),
 	});
 }

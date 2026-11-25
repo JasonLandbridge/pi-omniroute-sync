@@ -165,7 +165,7 @@ async function showConfigDialog(
 		};
 	}, {
 		overlay: true,
-		overlayOptions: { width: "80%", minWidth: 60, anchor: "center", margin: 2 },
+		...(options.host === "omp" ? {} : { overlayOptions: { width: "80%", minWidth: 60, anchor: "center", margin: 2 } }),
 	});
 	if (!saved) return;
 

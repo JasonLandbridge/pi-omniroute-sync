@@ -40,5 +40,12 @@ describe("host adapters", () => {
 		expect(options).toMatchObject({ homeEnvVar: "OMP_HOME", defaultHome: "~/.omp/agent", inferenceApi: "openai-completions" });
 		expect(options.matchesKey("\r", "enter")).toBe(true);
 		expect(options.createInput("initial").getValue()).toBe("initial");
+		const input = options.createInput("initial");
+		input.handleInput("\x15");
+		input.handleInput("http://localhost:20128");
+		const submitted = vi.fn();
+		input.onSubmit = submitted;
+		input.handleInput("\x1b[13u");
+		expect(submitted).toHaveBeenCalledWith("http://localhost:20128");
 	});
 });
